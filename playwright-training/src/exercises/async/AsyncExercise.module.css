@@ -1,0 +1,131 @@
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.section {
+  padding: 1rem 0;
+}
+
+.sectionTitle {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+}
+
+.hint {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  margin-bottom: 0.75rem;
+}
+
+.divider {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: 0.5rem 0;
+}
+
+.btn {
+  padding: 8px 18px;
+  background: var(--color-primary);
+  color: white;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: background 0.15s;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--color-primary-dark);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.spinner {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  margin-top: 0.75rem;
+  border: 3px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.userList {
+  list-style: none;
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.userCard {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--color-surface-2);
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+}
+
+.input {
+  display: block;
+  width: 100%;
+  max-width: 300px;
+  padding: 7px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  font-family: inherit;
+  outline: none;
+}
+
+.input:focus {
+  border-color: var(--color-primary);
+}
+
+.resultCount {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.resultList {
+  list-style: none;
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.resultList li {
+  font-size: 0.85rem;
+  padding: 3px 0;
+}
+
+.itemList {
+  list-style: none;
+  margin-bottom: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.item {
+  padding: 6px 10px;
+  background: var(--color-surface-2);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+}

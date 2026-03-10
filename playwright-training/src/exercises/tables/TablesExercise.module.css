@@ -1,0 +1,151 @@
+.wrapper {
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.filterInput {
+  padding: 7px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  font-family: inherit;
+  outline: none;
+  flex: 1;
+  min-width: 180px;
+  max-width: 280px;
+}
+
+.filterInput:focus {
+  border-color: var(--color-primary);
+}
+
+.selectedCount {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.tableWrapper {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.table thead th {
+  text-align: left;
+  padding: 8px 12px;
+  background: var(--color-surface-2);
+  border-bottom: 1px solid var(--color-border);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.table tbody td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+}
+
+.table tbody tr:hover {
+  background: #fafafa;
+}
+
+.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.sortable:hover {
+  background: var(--color-border) !important;
+}
+
+.sortIcon {
+  font-size: 0.75rem;
+  opacity: 0.5;
+  margin-left: 4px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.badgeActive {
+  background: #dcfce7;
+  color: var(--color-success);
+}
+
+.badgeInactive {
+  background: #fee2e2;
+  color: var(--color-danger);
+}
+
+.noResults {
+  text-align: center;
+  color: var(--color-text-muted);
+  padding: 2rem;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 1rem;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.paginationInfo {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.pageButtons {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.pageBtn {
+  padding: 4px 10px;
+  border: 1px solid var(--color-border);
+  background: white;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.pageBtn:hover:not(:disabled) {
+  background: var(--color-surface-2);
+}
+
+.pageBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pageBtnActive {
+  background: var(--color-primary);
+  color: white;
+  border-color: var(--color-primary);
+}
+
+.pageBtnActive:hover {
+  background: var(--color-primary-dark) !important;
+}

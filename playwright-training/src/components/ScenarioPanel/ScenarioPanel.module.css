@@ -1,0 +1,81 @@
+.panel {
+  padding-bottom: 2rem;
+}
+
+.title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+.description {
+  color: var(--color-text-muted);
+  margin-bottom: 1.5rem;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.scenarios {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.scenario {
+  background: white;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+}
+
+.scenarioDone {
+  border-color: var(--color-success);
+  background: #f0fdf4;
+}
+
+.scenarioHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 0.5rem;
+}
+
+.scenarioNum {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.scenarioTitle {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.scenarioDesc {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  margin-bottom: 0.75rem;
+  line-height: 1.5;
+}
+
+.markComplete {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  margin-top: 0.5rem;
+}
+
+.markComplete input {
+  accent-color: var(--color-success);
+}

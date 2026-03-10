@@ -1,0 +1,68 @@
+.wrapper {
+  margin-top: 0.5rem;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  transition: background 0.15s;
+}
+
+.toggle:hover {
+  background: var(--color-surface-2);
+}
+
+.chevron {
+  font-size: 0.7rem;
+}
+
+.codeWrapper {
+  position: relative;
+  margin-top: 0.5rem;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.pre {
+  margin: 0 !important;
+  padding: 1rem !important;
+  font-size: 0.8rem !important;
+  border-radius: var(--radius-md) !important;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+
+.lineNum {
+  display: inline-block;
+  width: 2em;
+  text-align: right;
+  margin-right: 1.5em;
+  color: #4a6070;
+  user-select: none;
+  font-size: 0.75em;
+}
+
+.copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2);
+  color: #9eb5c8;
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.copy:hover {
+  background: rgba(255,255,255,0.2);
+}
