@@ -428,7 +428,10 @@ function compileAction(text, verb, appModel, pageUrl) {
   }
 
   if (verb === 'click' && /\bdrawer\s+backdrop\b/i.test(text)) {
-    return [{ type: 'repeatClickUntilGone', locator: buildLocator('drawer backdrop', appModel, pageUrl), waitMs: 500, maxIterations: 5 }];
+    return [
+      { type: 'click', locator: buildLocator('drawer backdrop', appModel, pageUrl) },
+      { type: 'wait', ms: 300 }
+    ];
   }
 
   if (verb === 'click' && /\btoggle\s+button\s+again\b/i.test(text)) {
