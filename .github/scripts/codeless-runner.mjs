@@ -747,20 +747,14 @@ function buildReport({ timestamp, baseUrl, results }) {
       const statusIcon = result.status === 'PASS' ? '✓' : result.status === 'FAIL' ? '✗' : '⊘';
       md += `- ${statusIcon} ${result.title}\n`;
       if (result.status === 'FAIL') {
-        md += `  failed step: ${result.step || 'Unknown step'}\n`;
-        md += `  error: ${result.reason}\n`;
+        md += '\n```text\n';
+        md += `failed step: ${result.step || 'Unknown step'}\n`;
+        md += `error: ${result.reason}\n`;
         if (result.screenshot) {
           const screenshotFileName = path.basename(result.screenshot);
-          md += `  screenshot file: ${screenshotFileName}\n`;
-          md += '  screenshot artifact: codeless-failure-screenshots\n';
+          md += `screenshot file: ${screenshotFileName}\n`;
         }
-        if (result.stack) {
-          const safeStack = String(result.stack).replace(/```/g, "'''").trim();
-          md += '  stack trace:\n\n';
-          md += '```text\n';
-          md += `${safeStack}\n`;
-          md += '```\n';
-        }
+        md += '```\n';
       }
     }
     md += '\n';
@@ -818,7 +812,6 @@ async function run() {
           steps: scenario.steps,
           step: error?.step || 'Unknown step',
           reason: error?.message || String(error),
-          stack: error?.stack || '',
           screenshot: screenshotArtifactPath,
         });
         
