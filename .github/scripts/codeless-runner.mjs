@@ -859,6 +859,15 @@ async function run() {
 
   await fs.writeFile(LATEST_REPORT, report, 'utf8');
 
+  // Write report to GitHub Actions summary if running in CI
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    try {
+      await fs.appendFile(process.env.GITHUB_STEP_SUMMARY, report + '\n', 'utf8');
+    } catch {
+      // Fail silently if unable to write to summary
+    }
+  }
+
   const failed = results.filter((r) => r.status === 'FAIL').length;
   const summary = `Codeless run complete: total=${results.length}, passed=${results.length - failed}, failed=${failed}`;
   if (failed > 0) {
