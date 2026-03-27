@@ -141,6 +141,7 @@ async function scrapeAppModel(startUrls, baseUrl) {
   async function probeInteractiveStates() {
     let model = await readPageModel();
     const maxPasses = 2;
+    const startUrl = page.url();
 
     for (let pass = 0; pass < maxPasses; pass += 1) {
       const buttons = page.locator('button,[role="button"]');
@@ -155,7 +156,14 @@ async function scrapeAppModel(startUrls, baseUrl) {
           // Some interactions are asynchronous (loaders, delayed content).
           await page.waitForTimeout(1200);
 
-          model = mergeModels(model, await readPageModel());
+          // Keep per-page models scoped: if probing navigates elsewhere, restore
+          // the original route and skip merging cross-route DOM into this page.
+          if (page.url() === startUrl) {
+            model = mergeModels(model, await readPageModel());
+          } else {
+            await page.goto(startUrl, { waitUntil: 'domcontentloaded' }).catch(() => {});
+            continue;
+          }
 
           // Try generic close actions so probing can continue safely.
           await page.keyboard.press('Escape').catch(() => {});
@@ -223,8 +231,19 @@ function buildLocator(phrase, appModel, pageUrl) {
 
   if (lower.includes('code block')) return { kind: 'css', value: 'pre' };
   if (/\bform\s+is\s+visible\b/i.test(lower) || /^form$/i.test(lower)) return { kind: 'css', value: 'form' };
-  if (tokens.includes('exercise') && tokens.includes('card')) return { kind: 'css', value: 'a[href*="/exercises/"]' };
+  if (tokens.includes('exercise') && tokens.includes('card')) {
+    return { kind: 'css', value: 'section:has(h2:has-text("Exercises")) a[href*="/exercises/"]' };
+  }
   if (tokens.includes('card') && !tokens.includes('user')) return { kind: 'css', value: 'a' };
+  if (tokens.includes('toggle') && tokens.includes('button')) {
+    return {
+      kind: 'any',
+      candidates: [
+        { kind: 'role', role: 'button', name: phrase },
+        { kind: 'css', value: 'button[aria-expanded], [role="button"][aria-expanded]' },
+      ],
+    };
+  }
 
   if (tokens.includes('drawer') && testIds.includes('drawer')) return { kind: 'testId', value: 'drawer' };
   if (tokens.includes('backdrop') && testIds.includes('drawer-backdrop')) return { kind: 'testId', value: 'drawer-backdrop' };
@@ -232,8 +251,14 @@ function buildLocator(phrase, appModel, pageUrl) {
   if (tokens.includes('tooltip') && tokens.includes('trigger') && testIds.includes('tooltip-trigger')) return { kind: 'testId', value: 'tooltip-trigger' };
   if (tokens.includes('tooltip') && testIds.includes('tooltip-content')) return { kind: 'testId', value: 'tooltip-content' };
   if (tokens.includes('success') && (tokens.includes('banner') || tokens.includes('message'))) {
-    const successId = testIds.find((id) => /success/i.test(id));
-    if (successId) return { kind: 'testId', value: successId };
+    const successCandidates = testIds
+      .filter((id) => /success/i.test(id))
+      .map((id) => ({
+        id,
+        score: tokens.reduce((n, token) => n + (id.toLowerCase().includes(token) ? 2 : 0), 0),
+      }))
+      .sort((a, b) => (b.score - a.score) || (a.id.length - b.id.length));
+    if (successCandidates[0]) return { kind: 'testId', value: successCandidates[0].id };
   }
 
   if (tokens.includes('table') && tokens.includes('row')) {
@@ -436,6 +461,13 @@ function compileAction(text, verb, appModel, pageUrl) {
 // Rules use universal assertion vocabulary only — no project-specific phrases.
 
 const ASSERTION_RULES = [
+  {
+    test: (t) => /\bshould display a\s+"[^"]*N[^"]*"/i.test(t),
+    compile: (_t, q) => {
+      const escaped = (q[0] || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return [{ type: 'assert', assertion: 'textMatchesPattern', pattern: escaped.replace(/N/g, '\\d+'), flags: 'i' }];
+    },
+  },
   // Generic "I should see ..." forms
   {
     test: (t) => /^I should see the heading "/i.test(t),

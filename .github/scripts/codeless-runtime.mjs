@@ -104,6 +104,28 @@ async function waitForCondition(check, timeoutMs = 3000, stepMs = 100) {
   }
 }
 
+async function waitForInteractable(locator, timeout = 5000) {
+  await locator.waitFor({ state: 'visible', timeout });
+  await locator.scrollIntoViewIfNeeded();
+  const enabled = await waitForCondition(async () => !(await locator.isDisabled()), Math.min(timeout, 3000));
+  if (!enabled) throw new Error('Target is visible but disabled');
+}
+
+async function clickWithoutForce(locator, timeout = 5000) {
+  await waitForInteractable(locator, timeout);
+  await locator.click({ timeout });
+}
+
+async function checkWithoutForce(locator, timeout = 5000) {
+  await waitForInteractable(locator, timeout);
+  await locator.check({ timeout });
+}
+
+async function uncheckWithoutForce(locator, timeout = 5000) {
+  await waitForInteractable(locator, timeout);
+  await locator.uncheck({ timeout });
+}
+
 async function runOperation(page, op, baseUrl) {
   switch (op.type) {
     case 'resetTo': {
@@ -120,12 +142,13 @@ async function runOperation(page, op, baseUrl) {
       return;
     }
     case 'click': {
-      await locatorFromSpec(page, op.locator).first().click();
+      const locator = locatorFromSpec(page, op.locator).first();
+      await clickWithoutForce(locator, op.timeout || 5000);
       return;
     }
     case 'clickInRoleContainer': {
       const container = page.getByRole(op.containerRole).first();
-      await container.getByRole(op.role, { name: op.name }).first().click();
+      await clickWithoutForce(container.getByRole(op.role, { name: op.name }).first(), op.timeout || 5000);
       return;
     }
     case 'repeatClickUntilGone': {
@@ -141,11 +164,7 @@ async function runOperation(page, op, baseUrl) {
     case 'check': {
       const locator = locatorFromSpec(page, op.locator).first();
       if (!(await locator.isChecked())) {
-        try {
-          await locator.check();
-        } catch {
-          await locator.click({ force: true });
-        }
+        await checkWithoutForce(locator, op.timeout || 5000);
       }
       return;
     }
@@ -155,11 +174,7 @@ async function runOperation(page, op, baseUrl) {
       for (let i = 0; i < count; i += 1) {
         const rowCb = locator.nth(i);
         if (!(await rowCb.isChecked())) {
-          try {
-            await rowCb.check();
-          } catch {
-            await rowCb.click({ force: true });
-          }
+          await checkWithoutForce(rowCb, op.timeout || 5000);
         }
       }
       return;
@@ -167,11 +182,7 @@ async function runOperation(page, op, baseUrl) {
     case 'uncheck': {
       const locator = locatorFromSpec(page, op.locator).first();
       if (await locator.isChecked()) {
-        try {
-          await locator.uncheck();
-        } catch {
-          await locator.click({ force: true });
-        }
+        await uncheckWithoutForce(locator, op.timeout || 5000);
       }
       return;
     }
@@ -247,6 +258,15 @@ async function runOperation(page, op, baseUrl) {
         assert(op.stepText, ok, op.message || `Expected visible text ${op.value}`);
         return;
       }
+      if (op.assertion === 'textMatchesPattern') {
+        const re = new RegExp(op.pattern, op.flags || '');
+        const ok = await waitForCondition(async () => {
+          const bodyText = await page.locator('body').innerText();
+          return re.test(bodyText || '');
+        }, op.timeout || 3000);
+        assert(op.stepText, ok, op.message || `Expected text matching /${op.pattern}/${op.flags || ''}`);
+        return;
+      }
       if (op.assertion === 'textNotPresent') {
         assert(op.stepText, !(await visible(page.getByText(op.value))), op.message || `Expected text not present ${op.value}`);
         return;
@@ -299,7 +319,14 @@ async function runOperation(page, op, baseUrl) {
           const row = rows.nth(i);
           const hasLabel = await row.getByText(op.label, { exact: false }).count();
           if (!hasLabel) continue;
-          const control = row.locator('input[type="checkbox"],input[type="radio"]');
+
+          // Prefer an adjacent control next to the matching label for accuracy.
+          const safeLabel = String(op.label || '').replace(/"/g, '\\"');
+          const adjacentControl = row.locator(`label:has-text("${safeLabel}") + input[type="checkbox"], label:has-text("${safeLabel}") + input[type="radio"]`);
+          let control = adjacentControl;
+          if ((await adjacentControl.count()) === 0) {
+            control = row.locator('input[type="checkbox"],input[type="radio"]');
+          }
           if ((await control.count()) > 0) {
             checked = await control.first().isChecked();
             break;
