@@ -23,6 +23,7 @@ function assert(step, condition, reason) {
 
 function locatorFromSpec(page, spec) {
   if (!spec) throw new Error('Missing locator spec');
+  const area = page.getByTestId('practice-area');
 
   if (spec.kind === 'any') {
     return {
@@ -70,12 +71,12 @@ function locatorFromSpec(page, spec) {
     };
   }
 
-  if (spec.kind === 'testId') return page.getByTestId(spec.value);
-  if (spec.kind === 'label') return page.getByLabel(spec.value);
-  if (spec.kind === 'text') return page.getByText(spec.value);
-  if (spec.kind === 'css') return page.locator(spec.value);
-  if (spec.kind === 'testIdPrefix') return page.locator(`[data-testid^="${spec.value}"]`);
-  if (spec.kind === 'role') return page.getByRole(spec.role, { name: spec.name });
+  if (spec.kind === 'testId') return area.getByTestId(spec.value).or(page.getByTestId(spec.value));
+  if (spec.kind === 'label') return area.getByLabel(spec.value).or(page.getByLabel(spec.value));
+  if (spec.kind === 'text') return area.getByText(spec.value).or(page.getByText(spec.value));
+  if (spec.kind === 'css') return area.locator(spec.value).or(page.locator(spec.value));
+  if (spec.kind === 'testIdPrefix') return area.locator(`[data-testid^="${spec.value}"]`).or(page.locator(`[data-testid^="${spec.value}"]`));
+  if (spec.kind === 'role') return area.getByRole(spec.role, { name: spec.name }).or(page.getByRole(spec.role, { name: spec.name }));
 
   throw new Error(`Unknown locator kind: ${spec.kind}`);
 }
@@ -144,6 +145,21 @@ async function runOperation(page, op, baseUrl) {
           await locator.check();
         } catch {
           await locator.click({ force: true });
+        }
+      }
+      return;
+    }
+    case 'checkEach': {
+      const locator = locatorFromSpec(page, op.locator);
+      const count = Math.min(op.count || (await locator.count()), await locator.count());
+      for (let i = 0; i < count; i += 1) {
+        const rowCb = locator.nth(i);
+        if (!(await rowCb.isChecked())) {
+          try {
+            await rowCb.check();
+          } catch {
+            await rowCb.click({ force: true });
+          }
         }
       }
       return;
@@ -273,6 +289,28 @@ async function runOperation(page, op, baseUrl) {
           const cb = rows.nth(i).getByTestId('row-checkbox');
           assert(op.stepText, (await cb.count()) > 0 && !(await cb.first().isChecked()), `Expected unchecked row checkbox at ${i + 1}`);
         }
+        return;
+      }
+      if (op.assertion === 'containerHasLabelAndControlChecked') {
+        const rows = page.locator(op.container || '[data-testid="drawer-content"], aside');
+        const rowCount = await rows.count();
+        let checked = false;
+        for (let i = 0; i < rowCount; i += 1) {
+          const row = rows.nth(i);
+          const hasLabel = await row.getByText(op.label, { exact: false }).count();
+          if (!hasLabel) continue;
+          const control = row.locator('input[type="checkbox"],input[type="radio"]');
+          if ((await control.count()) > 0) {
+            checked = await control.first().isChecked();
+            break;
+          }
+        }
+        assert(op.stepText, checked, op.message || `Expected checked control for label '${op.label}'`);
+        return;
+      }
+      if (op.assertion === 'anyExpandedToggle') {
+        const expanded = page.locator('button[aria-expanded="true"], [role="button"][aria-expanded="true"]');
+        assert(op.stepText, (await expanded.count()) > 0, op.message || 'Expected at least one expanded toggle');
         return;
       }
       if (op.assertion === 'inputValueEquals') {

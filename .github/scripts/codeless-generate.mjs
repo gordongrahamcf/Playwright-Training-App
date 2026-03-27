@@ -222,17 +222,23 @@ function buildLocator(phrase, appModel, pageUrl) {
     .filter((t) => t && !['the', 'a', 'an', 'of', 'in', 'on', 'to', 'for', 'and', 'all'].includes(t));
 
   if (lower.includes('code block')) return { kind: 'css', value: 'pre' };
-  if (tokens.includes('form')) return { kind: 'css', value: 'form' };
-  if (tokens.includes('exercise') && tokens.includes('card')) return { kind: 'css', value: 'a' };
+  if (/\bform\s+is\s+visible\b/i.test(lower) || /^form$/i.test(lower)) return { kind: 'css', value: 'form' };
+  if (tokens.includes('exercise') && tokens.includes('card')) return { kind: 'css', value: 'a[href*="/exercises/"]' };
   if (tokens.includes('card') && !tokens.includes('user')) return { kind: 'css', value: 'a' };
 
   if (tokens.includes('drawer') && testIds.includes('drawer')) return { kind: 'testId', value: 'drawer' };
   if (tokens.includes('backdrop') && testIds.includes('drawer-backdrop')) return { kind: 'testId', value: 'drawer-backdrop' };
   if (tokens.includes('tooltip') && tokens.includes('content') && testIds.includes('tooltip-content')) return { kind: 'testId', value: 'tooltip-content' };
   if (tokens.includes('tooltip') && tokens.includes('trigger') && testIds.includes('tooltip-trigger')) return { kind: 'testId', value: 'tooltip-trigger' };
-  if (tokens.includes('success') && tokens.includes('banner')) {
+  if (tokens.includes('tooltip') && testIds.includes('tooltip-content')) return { kind: 'testId', value: 'tooltip-content' };
+  if (tokens.includes('success') && (tokens.includes('banner') || tokens.includes('message'))) {
     const successId = testIds.find((id) => /success/i.test(id));
     if (successId) return { kind: 'testId', value: successId };
+  }
+
+  if (tokens.includes('table') && tokens.includes('row')) {
+    const rowId = testIds.find((id) => id.includes('table-row'));
+    if (rowId) return { kind: 'testId', value: rowId };
   }
 
   if (tokens.includes('column') && tokens.includes('header')) {
@@ -400,7 +406,15 @@ function compileAction(text, verb, appModel, pageUrl) {
   }
 
   if (verb === 'check' && /\beach of the\s+\d+\s+rows?\s+individually\b/i.test(text)) {
-    return [{ type: 'check', locator: { kind: 'testId', value: 'row-checkbox' } }];
+    const n = Number((text.match(/\d+/) || ['0'])[0]);
+    return [{ type: 'checkEach', locator: { kind: 'testId', value: 'row-checkbox' }, count: n }];
+  }
+
+  if (verb === 'focus' && /\bthen\s+blur\s+it\s+without\s+typing\b/i.test(text) && q[0]) {
+    return [
+      { type: 'focus', locator: { kind: 'label', value: q[0] } },
+      { type: 'blur', locator: { kind: 'label', value: q[0] } },
+    ];
   }
 
   // click, check, uncheck, hover, blur, focus
@@ -502,6 +516,14 @@ const ASSERTION_RULES = [
     },
   },
   {
+    test: (t) => /"[^"]+"\s+section\s+should\s+not\s+show\s+its\s+content/i.test(t),
+    compile: (_t, q) => [{ type: 'assert', assertion: 'attributeEquals', locator: { kind: 'role', role: 'button', name: q[0] }, attribute: 'aria-expanded', value: 'false' }],
+  },
+  {
+    test: (t) => /\btips\s+content\s+should\s+become\s+visible\b/i.test(t),
+    compile: () => [{ type: 'assert', assertion: 'anyExpandedToggle' }],
+  },
+  {
     test: (t) => /\bshould not show (?:its\s+)?content\b/i.test(t),
     compile: (t, q, am, url) => {
       const subject = t.replace(/^(?:the|a|an)\s+/i, '').replace(/\s+should\s+not\s+show\s+.*$/i, '').trim();
@@ -536,6 +558,10 @@ const ASSERTION_RULES = [
       const control = /dropdown/i.test(t) ? 'select' : 'input[type="checkbox"]';
       return [{ type: 'assert', assertion: 'containerHasLabelAndControl', label: q[0], controlSelector: control }];
     },
+  },
+  {
+    test: (t) => /"[^"]+"\s+checkbox\s+in\s+the\s+drawer\s+should\s+be\s+checked/i.test(t),
+    compile: (_t, q) => [{ type: 'assert', assertion: 'containerHasLabelAndControlChecked', label: q[0], container: '[data-testid="drawer-content"]' }],
   },
 
   // Negative visibility
@@ -600,6 +626,20 @@ const ASSERTION_RULES = [
   {
     test: (t) => /^all\s+\d+\s+.*checkboxes\s+should\s+be\s+unchecked$/i.test(t),
     compile: () => [{ type: 'assert', assertion: 'rowCheckboxesUncheckedCurrentPage' }],
+  },
+  {
+    test: (t) => /\btable\s+should\s+display\s+\d+\s+rows?\b/i.test(t),
+    compile: (t, _q, am, url) => {
+      const n = Number((t.match(/\d+/) || ['0'])[0]);
+      return [{ type: 'assert', assertion: 'count', locator: buildLocator('table rows', am, url), value: n }];
+    },
+  },
+  {
+    test: (t) => /\bshould\s+be\s+visible\s+in\s+the\s+user\s+list\b/i.test(t),
+    compile: (t, _q, am, url) => {
+      const n = Number((t.match(/\d+/) || ['0'])[0]);
+      return [{ type: 'assert', assertion: 'count', locator: buildLocator('user cards', am, url), value: n }];
+    },
   },
   // URL
   {
