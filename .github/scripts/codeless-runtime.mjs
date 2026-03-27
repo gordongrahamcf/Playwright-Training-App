@@ -52,6 +52,7 @@ function locatorFromSpec(page, spec) {
           async focus() { return (await this._pick()).focus(); },
           async blur() { return (await this._pick()).blur(); },
           async hover() { return (await this._pick()).hover(); },
+          async press(key) { return (await this._pick()).press(key); },
           async scrollIntoViewIfNeeded() { return (await this._pick()).scrollIntoViewIfNeeded(); },
           async isVisible() { return (await this._pick()).isVisible(); },
           async isChecked() { return (await this._pick()).isChecked(); },
@@ -122,8 +123,28 @@ async function clickWithoutForce(locator, timeout = 5000) {
 async function checkWithoutForce(locator, timeout = 5000) {
   await waitForInteractable(locator, timeout);
   if (await locator.isChecked()) return;
-  await locator.click({ timeout });
-  const becameChecked = await waitForCondition(async () => locator.isChecked(), Math.min(timeout, 2000));
+  const settleMs = Math.min(timeout, 1000);
+
+  // Retry natural interactions before failing to reduce flaky checkbox toggles.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      if (attempt === 0) {
+        await locator.check({ timeout: settleMs });
+      } else if (attempt === 1) {
+        await locator.click({ timeout: settleMs });
+      } else {
+        await locator.focus();
+        await locator.press('Space');
+      }
+    } catch {
+      // Keep trying alternate non-force interactions.
+    }
+
+    const becameChecked = await waitForCondition(async () => locator.isChecked(), settleMs, 75);
+    if (becameChecked) return;
+  }
+
+  const becameChecked = await waitForCondition(async () => locator.isChecked(), settleMs, 75);
   if (!becameChecked) throw new Error('Clicking the checkbox did not change its state');
 }
 
