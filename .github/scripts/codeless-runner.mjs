@@ -750,7 +750,8 @@ function buildReport({ timestamp, baseUrl, results }) {
         md += `  - **Failed at step:** ${result.step || 'Unknown step'}\n`;
         md += `  - **Error:** ${result.reason}\n`;
         if (result.screenshot) {
-          md += `  - **Evidence:** [${path.basename(result.screenshot)}](${result.screenshot.replace(/\\/g, '/')})\n`;
+          const screenshotFilePath = result.screenshot.replace(/\\/g, '/');
+          md += `  - **Evidence:** <a href="${screenshotFilePath}" target="_blank">View screenshot</a>\n`;
         }
       }
     }
