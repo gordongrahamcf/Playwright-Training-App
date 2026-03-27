@@ -93,9 +93,29 @@ async function scrapeAppModel(startUrls, baseUrl) {
       pages[url] = await page.evaluate(() => {
         const uniq = (arr) => [...new Set(arr.filter(Boolean))];
         const txt = (el) => (el.textContent || '').replace(/\s+/g, ' ').trim();
+        const dedupeObj = (arr, keyFn) => {
+          const seen = new Set();
+          return arr.filter((item) => {
+            const key = keyFn(item);
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+        };
+
+        const buttonDetails = dedupeObj(
+          [...document.querySelectorAll('button,[role="button"]')].map((el) => ({
+            text: txt(el),
+            testId: el.getAttribute('data-testid') || '',
+            ariaLabel: el.getAttribute('aria-label') || '',
+          })),
+          (b) => `${b.text}|${b.testId}|${b.ariaLabel}`,
+        );
+
         return {
           testIds: uniq([...document.querySelectorAll('[data-testid]')].map((el) => el.getAttribute('data-testid'))),
           buttons: uniq([...document.querySelectorAll('button,[role="button"]')].map(txt)),
+          buttonDetails,
           labels: uniq([...document.querySelectorAll('label')].map(txt)),
           headings: uniq([...document.querySelectorAll('h1,h2,h3,h4')].map(txt)),
         };
@@ -126,11 +146,20 @@ function buildLocator(phrase, appModel, pageUrl) {
   const s = slug(phrase);
   const lower = phrase.toLowerCase();
   const testIds = page.testIds || [];
+  const buttonDetails = page.buttonDetails || [];
+
+  const singular = (token) => {
+    if (token.endsWith('ies') && token.length > 4) return `${token.slice(0, -3)}y`;
+    if (token.endsWith('xes') || token.endsWith('ches') || token.endsWith('shes')) return token.slice(0, -2);
+    if (token.endsWith('ses') && token.length > 4) return token.slice(0, -2);
+    if (token.endsWith('s') && !token.endsWith('ss') && token.length > 3) return token.slice(0, -1);
+    return token;
+  };
 
   const tokens = lower
     .replace(/[^a-z0-9\s-]/g, ' ')
     .split(/\s+/)
-    .map((t) => t.replace(/s$/, ''))
+    .map(singular)
     .filter((t) => t && !['the', 'a', 'an', 'of', 'in', 'on', 'to', 'for', 'and', 'all'].includes(t));
 
   if (tokens.includes('page') && tokens.includes('button')) {
@@ -165,6 +194,11 @@ function buildLocator(phrase, appModel, pageUrl) {
   if (testIds.includes(s)) return { kind: 'testId', value: s };
   const tid = testIds.find((id) => id.includes(s) || s.includes(id));
   if (tid) return { kind: 'testId', value: tid };
+
+  // Map visible button text to stable data-testid when available.
+  const btnByText = buttonDetails.find((b) => b.text && b.text.toLowerCase().includes(lower) && b.testId);
+  if (btnByText) return { kind: 'testId', value: btnByText.testId };
+
   const lbl = page.labels?.find((l) => l.toLowerCase().includes(lower));
   if (lbl) return { kind: 'label', value: lbl };
   const btn = page.buttons?.find((b) => b.toLowerCase().includes(lower));
@@ -176,7 +210,6 @@ function buildLocator(phrase, appModel, pageUrl) {
       { kind: 'testId', value: s },
       { kind: 'role', role: 'button', name: phrase },
       { kind: 'label', value: phrase },
-      { kind: 'text', value: phrase },
     ],
   };
 }
@@ -248,7 +281,14 @@ function compileAction(text, verb, appModel, pageUrl) {
 
   // Handle scoped clicks such as "... in the modal/drawer" by preferring button role.
   if (verb === 'click' && /\bin the\s+(modal|drawer)\b/i.test(text) && q[0]) {
+    if (/\bin the\s+modal\b/i.test(text)) {
+      return [{ type: 'clickInRoleContainer', containerRole: 'dialog', role: 'button', name: q[0] }];
+    }
     return [{ type: 'click', locator: { kind: 'role', role: 'button', name: q[0] } }];
+  }
+
+  if (verb === 'click' && /\bdrawer\s+backdrop\b/i.test(text)) {
+    return [{ type: 'click', locator: buildLocator('drawer backdrop', appModel, pageUrl) }];
   }
 
   if (verb === 'check' && /\bfirst\s+table\s+row\b/i.test(text)) {
@@ -362,11 +402,30 @@ const ASSERTION_RULES = [
     },
   },
   {
+    test: (t) => /\bshould not show (?:its\s+)?content\b/i.test(t),
+    compile: (t, q, am, url) => {
+      const subject = t.replace(/^(?:the|a|an)\s+/i, '').replace(/\s+should\s+not\s+show\s+.*$/i, '').trim();
+      return [{ type: 'assert', assertion: 'notVisible', locator: buildLocator(q[0] || subject, am, url) }];
+    },
+  },
+  {
+    test: (t) => /\bshould indicate it is expanded\b/i.test(t),
+    compile: (t, q, am, url) => {
+      const subject = q[0] || t.replace(/^(?:the|a|an)\s+/i, '').replace(/\s+should\s+indicate\s+.*$/i, '').trim();
+      return [{ type: 'assert', assertion: 'attributeEquals', locator: buildLocator(subject, am, url), attribute: 'aria-expanded', value: 'true' }];
+    },
+  },
+  {
     test: (t) => /\bshould remain visible\b/i.test(t),
     compile: (t, q, am, url) => {
       const subject = t.replace(/^(?:the|a|an)\s+/i, '').replace(/\s+should\s+remain\s+visible\s*$/i, '').trim();
       return [{ type: 'assert', assertion: 'visible', locator: buildLocator(q[0] || subject, am, url) }];
     },
+  },
+
+  {
+    test: (t) => /\bshould contain a\s+"[^"]+"\s+(checkbox|dropdown)\b/i.test(t),
+    compile: (_t, q, am, url) => [{ type: 'assert', assertion: 'visible', locator: buildLocator(q[0], am, url) }],
   },
 
   // Negative visibility
@@ -461,6 +520,30 @@ const ASSERTION_RULES = [
   {
     test: (t) => /\bshould contain\b.*\bwith role\b/i.test(t),
     compile: (_t, q) => [{ type: 'assert', assertion: 'allTextsPresent', values: q }],
+  },
+  {
+    test: (t) => /\btable rows should be sorted alphabetically ascending by\b/i.test(t),
+    compile: () => [{ type: 'assert', assertion: 'rowsSortedByName', value: 'asc' }],
+  },
+  {
+    test: (t) => /\btable rows should be sorted alphabetically descending by\b/i.test(t),
+    compile: () => [{ type: 'assert', assertion: 'rowsSortedByName', value: 'desc' }],
+  },
+  {
+    test: (t) => /\bfirst row in the table should show the lowest\b/i.test(t),
+    compile: () => [{ type: 'assert', assertion: 'firstRowLowestSalary' }],
+  },
+  {
+    test: (t) => /\btable should display the message\s+"[^"]+"/i.test(t),
+    compile: (_t, q) => [{ type: 'assert', assertion: 'textPresent', value: q[0] }],
+  },
+  {
+    test: (t) => /\beach\s+.+\s+should\s+display\s+.+/i.test(t),
+    compile: (t, q, am, url) => {
+      if (q.length > 0) return [{ type: 'assert', assertion: 'textPresent', value: q[0] }];
+      const subject = t.replace(/\s+should\s+display\s+.+$/i, '').replace(/^(?:each|the|a|an)\s+/i, '').trim();
+      return [{ type: 'assert', assertion: 'visible', locator: buildLocator(subject, am, url) }];
+    },
   },
   // "... should contain a card for \"X\" with role \"Y\""
   {

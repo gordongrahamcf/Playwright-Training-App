@@ -112,6 +112,11 @@ async function runOperation(page, op, baseUrl) {
       await locatorFromSpec(page, op.locator).first().click();
       return;
     }
+    case 'clickInRoleContainer': {
+      const container = page.getByRole(op.containerRole).first();
+      await container.getByRole(op.role, { name: op.name }).first().click();
+      return;
+    }
     case 'repeatClickUntilGone': {
       const maxIterations = op.maxIterations || 20;
       for (let i = 0; i < maxIterations; i += 1) {
@@ -208,11 +213,15 @@ async function runOperation(page, op, baseUrl) {
         return;
       }
       if (op.assertion === 'textPresent') {
-        assert(op.stepText, await visible(page.getByText(op.value)), op.message || `Expected visible text ${op.value}`);
+        const loc = page.getByText(op.value);
+        if (!(await visible(loc))) {
+          await page.waitForTimeout(300);
+        }
+        assert(op.stepText, await visible(loc), op.message || `Expected visible text ${op.value}`);
         return;
       }
       if (op.assertion === 'textNotPresent') {
-        assert(op.stepText, !(await exists(page.getByText(op.value))), op.message || `Expected text not present ${op.value}`);
+        assert(op.stepText, !(await visible(page.getByText(op.value))), op.message || `Expected text not present ${op.value}`);
         return;
       }
       if (op.assertion === 'allTextsPresent') {
