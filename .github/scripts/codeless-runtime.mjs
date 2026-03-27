@@ -93,6 +93,16 @@ async function textOf(locator) {
   return ((await locator.first().textContent()) || '').trim();
 }
 
+async function waitForCondition(check, timeoutMs = 3000, stepMs = 100) {
+  const start = Date.now();
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    if (await check()) return true;
+    if (Date.now() - start >= timeoutMs) return false;
+    await new Promise((r) => setTimeout(r, stepMs));
+  }
+}
+
 async function runOperation(page, op, baseUrl) {
   switch (op.type) {
     case 'resetTo': {
@@ -193,15 +203,18 @@ async function runOperation(page, op, baseUrl) {
       const locator = op.locator ? locatorFromSpec(page, op.locator) : null;
 
       if (op.assertion === 'visible') {
-        assert(op.stepText, await visible(locator), op.message || 'Expected visible');
+        const ok = await waitForCondition(() => visible(locator), op.timeout || 3000);
+        assert(op.stepText, ok, op.message || 'Expected visible');
         return;
       }
       if (op.assertion === 'notVisible') {
-        assert(op.stepText, !(await visible(locator)), op.message || 'Expected not visible');
+        const ok = await waitForCondition(async () => !(await visible(locator)), op.timeout || 3000);
+        assert(op.stepText, ok, op.message || 'Expected not visible');
         return;
       }
       if (op.assertion === 'count') {
-        assert(op.stepText, (await locator.count()) === op.value, op.message || `Expected count ${op.value}`);
+        const ok = await waitForCondition(async () => (await locator.count()) === op.value, op.timeout || 3000);
+        assert(op.stepText, ok, op.message || `Expected count ${op.value}`);
         return;
       }
       if (op.assertion === 'textEquals') {
@@ -214,10 +227,8 @@ async function runOperation(page, op, baseUrl) {
       }
       if (op.assertion === 'textPresent') {
         const loc = page.getByText(op.value);
-        if (!(await visible(loc))) {
-          await page.waitForTimeout(300);
-        }
-        assert(op.stepText, await visible(loc), op.message || `Expected visible text ${op.value}`);
+        const ok = await waitForCondition(() => visible(loc), op.timeout || 3000);
+        assert(op.stepText, ok, op.message || `Expected visible text ${op.value}`);
         return;
       }
       if (op.assertion === 'textNotPresent') {
@@ -236,6 +247,32 @@ async function runOperation(page, op, baseUrl) {
       }
       if (op.assertion === 'headingVisible') {
         assert(op.stepText, await visible(page.getByRole('heading', { name: op.value })), op.message || `Expected heading ${op.value}`);
+        return;
+      }
+      if (op.assertion === 'containerHasLabelAndControl') {
+        const rows = page.locator(op.container || '[data-testid="drawer-content"], aside');
+        const rowCount = await rows.count();
+        let found = false;
+        for (let i = 0; i < rowCount; i += 1) {
+          const row = rows.nth(i);
+          const hasLabel = await row.getByText(op.label, { exact: false }).count();
+          if (!hasLabel) continue;
+          const control = row.locator(op.controlSelector || 'input,select,textarea');
+          if ((await control.count()) > 0) {
+            found = true;
+            break;
+          }
+        }
+        assert(op.stepText, found, op.message || `Expected label '${op.label}' with control`);
+        return;
+      }
+      if (op.assertion === 'rowCheckboxesUncheckedCurrentPage') {
+        const rows = page.getByTestId('table-row');
+        const rowCount = await rows.count();
+        for (let i = 0; i < rowCount; i += 1) {
+          const cb = rows.nth(i).getByTestId('row-checkbox');
+          assert(op.stepText, (await cb.count()) > 0 && !(await cb.first().isChecked()), `Expected unchecked row checkbox at ${i + 1}`);
+        }
         return;
       }
       if (op.assertion === 'inputValueEquals') {

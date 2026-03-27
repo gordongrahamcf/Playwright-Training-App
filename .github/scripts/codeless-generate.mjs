@@ -86,41 +86,99 @@ async function scrapeAppModel(startUrls, baseUrl) {
   const page = await ctx.newPage();
   const pages = {};
 
+  async function readPageModel() {
+    return page.evaluate(() => {
+      const uniq = (arr) => [...new Set(arr.filter(Boolean))];
+      const txt = (el) => (el.textContent || '').replace(/\s+/g, ' ').trim();
+      const dedupeObj = (arr, keyFn) => {
+        const seen = new Set();
+        return arr.filter((item) => {
+          const key = keyFn(item);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      };
+
+      const buttonDetails = dedupeObj(
+        [...document.querySelectorAll('button,[role="button"]')].map((el) => ({
+          text: txt(el),
+          testId: el.getAttribute('data-testid') || '',
+          ariaLabel: el.getAttribute('aria-label') || '',
+        })),
+        (b) => `${b.text}|${b.testId}|${b.ariaLabel}`,
+      );
+
+      return {
+        testIds: uniq([...document.querySelectorAll('[data-testid]')].map((el) => el.getAttribute('data-testid'))),
+        buttons: uniq([...document.querySelectorAll('button,[role="button"]')].map(txt)),
+        buttonDetails,
+        labels: uniq([...document.querySelectorAll('label')].map(txt)),
+        headings: uniq([...document.querySelectorAll('h1,h2,h3,h4')].map(txt)),
+      };
+    });
+  }
+
+  function mergeModels(a, b) {
+    const uniq = (arr) => [...new Set((arr || []).filter(Boolean))];
+    const mergedButtons = [...(a?.buttonDetails || []), ...(b?.buttonDetails || [])];
+    const seen = new Set();
+    const buttonDetails = mergedButtons.filter((item) => {
+      const key = `${item.text}|${item.testId}|${item.ariaLabel}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    return {
+      testIds: uniq([...(a?.testIds || []), ...(b?.testIds || [])]),
+      buttons: uniq([...(a?.buttons || []), ...(b?.buttons || [])]),
+      labels: uniq([...(a?.labels || []), ...(b?.labels || [])]),
+      headings: uniq([...(a?.headings || []), ...(b?.headings || [])]),
+      buttonDetails,
+    };
+  }
+
+  async function probeInteractiveStates() {
+    let model = await readPageModel();
+    const maxPasses = 2;
+
+    for (let pass = 0; pass < maxPasses; pass += 1) {
+      const buttons = page.locator('button,[role="button"]');
+      const count = await buttons.count();
+      for (let i = 0; i < count; i += 1) {
+        try {
+          const btn = buttons.nth(i);
+          if (!(await btn.isVisible())) continue;
+          await btn.click({ timeout: 1000 });
+          await page.waitForTimeout(350);
+
+          // Some interactions are asynchronous (loaders, delayed content).
+          await page.waitForTimeout(1200);
+
+          model = mergeModels(model, await readPageModel());
+
+          // Try generic close actions so probing can continue safely.
+          await page.keyboard.press('Escape').catch(() => {});
+          const closeLike = page.locator('[data-testid*="close" i],[aria-label*="close" i],[data-testid*="backdrop" i]');
+          if ((await closeLike.count()) > 0) {
+            await closeLike.first().click({ timeout: 600 }).catch(() => {});
+          }
+          await page.waitForTimeout(100);
+        } catch {
+          // Ignore probe interaction failures and continue exploration.
+        }
+      }
+    }
+
+    return model;
+  }
+
   for (const raw of startUrls) {
     const url = normalizeUrl(raw, baseUrl);
     try {
       console.log(`[generate] Scraping ${url} …`);
       await page.goto(url, { waitUntil: 'domcontentloaded' });
-      pages[url] = await page.evaluate(() => {
-        const uniq = (arr) => [...new Set(arr.filter(Boolean))];
-        const txt = (el) => (el.textContent || '').replace(/\s+/g, ' ').trim();
-        const dedupeObj = (arr, keyFn) => {
-          const seen = new Set();
-          return arr.filter((item) => {
-            const key = keyFn(item);
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-          });
-        };
-
-        const buttonDetails = dedupeObj(
-          [...document.querySelectorAll('button,[role="button"]')].map((el) => ({
-            text: txt(el),
-            testId: el.getAttribute('data-testid') || '',
-            ariaLabel: el.getAttribute('aria-label') || '',
-          })),
-          (b) => `${b.text}|${b.testId}|${b.ariaLabel}`,
-        );
-
-        return {
-          testIds: uniq([...document.querySelectorAll('[data-testid]')].map((el) => el.getAttribute('data-testid'))),
-          buttons: uniq([...document.querySelectorAll('button,[role="button"]')].map(txt)),
-          buttonDetails,
-          labels: uniq([...document.querySelectorAll('label')].map(txt)),
-          headings: uniq([...document.querySelectorAll('h1,h2,h3,h4')].map(txt)),
-        };
-      });
+      pages[url] = await probeInteractiveStates();
       const p = pages[url];
       console.log(`[generate]   → ${p.testIds?.length ?? 0} test-ids, ${p.buttons?.length ?? 0} buttons, ${p.labels?.length ?? 0} labels`);
     } catch (err) {
@@ -163,6 +221,28 @@ function buildLocator(phrase, appModel, pageUrl) {
     .map(singular)
     .filter((t) => t && !['the', 'a', 'an', 'of', 'in', 'on', 'to', 'for', 'and', 'all'].includes(t));
 
+  if (lower.includes('code block')) return { kind: 'css', value: 'pre' };
+  if (tokens.includes('form')) return { kind: 'css', value: 'form' };
+  if (tokens.includes('exercise') && tokens.includes('card')) return { kind: 'css', value: 'a' };
+  if (tokens.includes('card') && !tokens.includes('user')) return { kind: 'css', value: 'a' };
+
+  if (tokens.includes('drawer') && testIds.includes('drawer')) return { kind: 'testId', value: 'drawer' };
+  if (tokens.includes('backdrop') && testIds.includes('drawer-backdrop')) return { kind: 'testId', value: 'drawer-backdrop' };
+  if (tokens.includes('tooltip') && tokens.includes('content') && testIds.includes('tooltip-content')) return { kind: 'testId', value: 'tooltip-content' };
+  if (tokens.includes('tooltip') && tokens.includes('trigger') && testIds.includes('tooltip-trigger')) return { kind: 'testId', value: 'tooltip-trigger' };
+  if (tokens.includes('success') && tokens.includes('banner')) {
+    const successId = testIds.find((id) => /success/i.test(id));
+    if (successId) return { kind: 'testId', value: successId };
+  }
+
+  if (tokens.includes('column') && tokens.includes('header')) {
+    const colName = tokens.find((t) => !['column', 'header'].includes(t));
+    if (colName) {
+      const headerId = testIds.find((id) => id.includes('col-header-') && id.includes(colName));
+      if (headerId) return { kind: 'testId', value: headerId };
+    }
+  }
+
   if (tokens.includes('page') && tokens.includes('button')) {
     const pagePrefix = testIds.find((id) => /^pagination-page-\d+$/.test(id));
     if (pagePrefix) return { kind: 'testIdPrefix', value: 'pagination-page-' };
@@ -193,7 +273,8 @@ function buildLocator(phrase, appModel, pageUrl) {
   }
 
   if (testIds.includes(s)) return { kind: 'testId', value: s };
-  const tid = testIds.find((id) => id.includes(s) || s.includes(id));
+  const tidCandidates = testIds.filter((id) => id.includes(s) || s.includes(id));
+  const tid = tidCandidates.sort((a, b) => a.length - b.length)[0];
   if (tid) return { kind: 'testId', value: tid };
 
   // Map visible button text to stable data-testid when available.
@@ -210,7 +291,9 @@ function buildLocator(phrase, appModel, pageUrl) {
     candidates: [
       { kind: 'testId', value: s },
       { kind: 'role', role: 'button', name: phrase },
+      { kind: 'role', role: 'link', name: phrase },
       { kind: 'label', value: phrase },
+      { kind: 'text', value: phrase },
     ],
   };
 }
@@ -433,6 +516,13 @@ const ASSERTION_RULES = [
     },
   },
   {
+    test: (t) => /\bcolumn header should show the neutral \(unsorted\) indicator\b/i.test(t),
+    compile: (t, _q, am, url) => {
+      const subject = t.replace(/^(?:the|a|an)\s+/i, '').replace(/\s+should\s+show\s+the\s+neutral.*$/i, '').trim();
+      return [{ type: 'assert', assertion: 'textIncludes', locator: buildLocator(subject, am, url), value: '↕' }];
+    },
+  },
+  {
     test: (t) => /\bshould remain visible\b/i.test(t),
     compile: (t, q, am, url) => {
       const subject = t.replace(/^(?:the|a|an)\s+/i, '').replace(/\s+should\s+remain\s+visible\s*$/i, '').trim();
@@ -442,7 +532,10 @@ const ASSERTION_RULES = [
 
   {
     test: (t) => /\bshould contain a\s+"[^"]+"\s+(checkbox|dropdown)\b/i.test(t),
-    compile: (_t, q, am, url) => [{ type: 'assert', assertion: 'visible', locator: buildLocator(q[0], am, url) }],
+    compile: (t, q) => {
+      const control = /dropdown/i.test(t) ? 'select' : 'input[type="checkbox"]';
+      return [{ type: 'assert', assertion: 'containerHasLabelAndControl', label: q[0], controlSelector: control }];
+    },
   },
 
   // Negative visibility
@@ -506,7 +599,7 @@ const ASSERTION_RULES = [
   },
   {
     test: (t) => /^all\s+\d+\s+.*checkboxes\s+should\s+be\s+unchecked$/i.test(t),
-    compile: (_t, _q, am, url) => [{ type: 'assert', assertion: 'allUnchecked', locator: buildLocator('row checkboxes', am, url) }],
+    compile: () => [{ type: 'assert', assertion: 'rowCheckboxesUncheckedCurrentPage' }],
   },
   // URL
   {
