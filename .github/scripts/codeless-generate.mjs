@@ -20,6 +20,7 @@ import { chromium } from 'playwright';
 
 const ROOT = process.cwd();
 const ACCEPTANCE_DIR = path.join(ROOT, '.github', 'acceptance-criteria');
+const GENERATED_RESULTS_DIR = path.join(ROOT, '.github', '.results', 'generated');
 
 // ── Feature file parser ──────────────────────────────────────────────────────
 
@@ -218,6 +219,22 @@ function buildLocator(phrase, appModel, pageUrl) {
 
 function extractQuoted(text) {
   return [...text.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+}
+
+function stepTemplate(text) {
+  let indexQ = 0;
+  let indexN = 0;
+  return text
+    .replace(/"([^"]+)"/g, () => {
+      indexQ += 1;
+      return `"{q${indexQ}}"`;
+    })
+    .replace(/\b\d+\b/g, () => {
+      indexN += 1;
+      return `{n${indexN}}`;
+    })
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 // Universal action verbs used in web-testing BDD
@@ -603,23 +620,47 @@ function compileWaitPattern(text, appModel, pageUrl) {
 // ── Step compiler entry point ─────────────────────────────────────────────────
 
 function compileStep(text, appModel, pageUrl) {
+  const template = stepTemplate(text);
+
   // 1. Action: starts with "I <known-verb>"
   const verb = extractActionVerb(text);
-  if (verb) return compileAction(text, verb, appModel, pageUrl);
+  if (verb) {
+    return {
+      template,
+      strategy: 'action',
+      operations: compileAction(text, verb, appModel, pageUrl),
+    };
+  }
 
   // 2. Assertion: contains "should" (also handles "I should see …")
   if (/\bshould\b/i.test(text)) {
     const ops = compileAssertion(text, appModel, pageUrl);
-    if (ops) return ops;
+    if (ops) {
+      return {
+        template,
+        strategy: 'assertion',
+        operations: ops,
+      };
+    }
   }
 
   // 3. Background / context waiting steps
   const waitOp = compileWaitPattern(text, appModel, pageUrl);
-  if (waitOp) return waitOp;
+  if (waitOp) {
+    return {
+      template,
+      strategy: 'wait',
+      operations: waitOp,
+    };
+  }
 
   // 4. Unrecognised — emit a skip so the run still proceeds
   console.warn(`  [SKIP] Step not recognised by generic compiler: ${text}`);
-  return [{ type: 'skip', text }];
+  return {
+    template,
+    strategy: 'skip',
+    operations: [{ type: 'skip', text }],
+  };
 }
 
 // ── Model compilation ─────────────────────────────────────────────────────────
@@ -645,21 +686,45 @@ function getScenarioStartUrl(scenario, baseUrl) {
 }
 
 function compileModel(acceptanceModel, appModel, baseUrl) {
-  return acceptanceModel.map((feature) => ({
+  const templateStats = new Map();
+
+  const compiledModel = acceptanceModel.map((feature) => ({
     feature: feature.feature,
     scenarios: feature.scenarios.map((scenario) => {
       const pageUrl = getScenarioStartUrl(scenario, baseUrl);
       return {
         title: scenario.title,
         startUrl: pageUrl,
-        steps: scenario.steps.map((step) => ({
-          keyword: step.keyword,
-          text: step.text,
-          operations: compileStep(step.text, appModel, pageUrl),
-        })),
+        steps: scenario.steps.map((step) => {
+          const compiled = compileStep(step.text, appModel, pageUrl);
+          const current = templateStats.get(compiled.template) || {
+            template: compiled.template,
+            strategy: compiled.strategy,
+            count: 0,
+            examples: [],
+          };
+          current.count += 1;
+          if (current.examples.length < 3 && !current.examples.includes(step.text)) {
+            current.examples.push(step.text);
+          }
+          templateStats.set(compiled.template, current);
+
+          return {
+            keyword: step.keyword,
+            text: step.text,
+            template: compiled.template,
+            compileStrategy: compiled.strategy,
+            operations: compiled.operations,
+          };
+        }),
       };
     }),
   }));
+
+  const templates = [...templateStats.values()].sort((a, b) => b.count - a.count);
+  const unhandledTemplates = templates.filter((t) => t.strategy === 'skip');
+
+  return { compiledModel, templates, unhandledTemplates };
 }
 
 // ── Generated runner builder ──────────────────────────────────────────────────
@@ -692,18 +757,26 @@ export async function generateCodelessRunner({ outputPath, baseUrl }) {
   const startUrls = collectStartUrls(acceptanceModel, baseUrl);
   console.log(`[generate] Collecting start URLs: ${startUrls.join(', ')}`);
   const appModel = await scrapeAppModel(startUrls, baseUrl);
-  const compiledModel = compileModel(acceptanceModel, appModel, baseUrl);
+  const { compiledModel, templates, unhandledTemplates } = compileModel(acceptanceModel, appModel, baseUrl);
   const totalSteps = compiledModel.reduce((n, f) => n + f.scenarios.reduce((s, sc) => s + sc.steps.length, 0), 0);
   console.log(`[generate] Compiled ${totalSteps} step(s) across ${compiledModel.reduce((n, f) => n + f.scenarios.length, 0)} scenario(s).`);
+  console.log(`[generate] Step templates discovered: ${templates.length} (${unhandledTemplates.length} unhandled).`);
 
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  await fs.mkdir(GENERATED_RESULTS_DIR, { recursive: true });
   await fs.writeFile(outputPath, buildGeneratedRunner({ compiledModel, appModel, baseUrl }), 'utf8');
+  await fs.writeFile(path.join(GENERATED_RESULTS_DIR, 'step-templates.json'), JSON.stringify(templates, null, 2), 'utf8');
+  await fs.writeFile(path.join(GENERATED_RESULTS_DIR, 'unhandled-step-templates.json'), JSON.stringify(unhandledTemplates, null, 2), 'utf8');
   console.log(`[generate] Runner written to ${outputPath}`);
+  console.log(`[generate] Template index written to ${path.join(GENERATED_RESULTS_DIR, 'step-templates.json')}`);
+  console.log(`[generate] Unhandled templates written to ${path.join(GENERATED_RESULTS_DIR, 'unhandled-step-templates.json')}`);
 
   return {
     outputPath,
     featureCount: acceptanceModel.length,
     scenarioCount: acceptanceModel.reduce((n, f) => n + f.scenarios.length, 0),
     startUrlCount: startUrls.length,
+    templateCount: templates.length,
+    unhandledTemplateCount: unhandledTemplates.length,
   };
 }

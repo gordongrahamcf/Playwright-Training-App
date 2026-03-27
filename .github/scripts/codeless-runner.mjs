@@ -40,7 +40,7 @@ async function generateRunner() {
     baseUrl: BASE_URL,
   });
   console.log(
-    `[runner] Generated from ${details.featureCount} feature files, ${details.scenarioCount} scenarios, ${details.startUrlCount} scraped URL(s).`,
+    `[runner] Generated from ${details.featureCount} feature files, ${details.scenarioCount} scenarios, ${details.startUrlCount} scraped URL(s), ${details.templateCount} step template(s), ${details.unhandledTemplateCount} unhandled template(s).`,
   );
 }
 

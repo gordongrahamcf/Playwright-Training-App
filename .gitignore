@@ -26,3 +26,4 @@ dist-ssr
 # Generated codeless acceptance artifacts
 .github/.results/screenshots/*.png
 .github/.results/generated/*.mjs
+.github/.results/generated/*.json
