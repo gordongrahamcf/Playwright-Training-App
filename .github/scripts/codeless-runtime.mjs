@@ -173,7 +173,12 @@ async function runOperation(page, op, baseUrl) {
     }
     case 'click': {
       const locator = locatorFromSpec(page, op.locator).first();
-      await clickWithoutForce(locator, op.timeout || 5000);
+      // Backdrop elements (overlays) should use direct click, not safety checks
+      if (op.locator?.value === 'drawer-backdrop' || op.locator?.value === 'modal-backdrop') {
+        await locator.click();
+      } else {
+        await clickWithoutForce(locator, op.timeout || 5000);
+      }
       return;
     }
     case 'clickInRoleContainer': {
