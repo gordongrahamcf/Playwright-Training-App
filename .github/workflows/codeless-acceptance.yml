@@ -49,11 +49,11 @@ jobs:
         env:
           SCREENSHOT_ARTIFACT_URL: ${{ steps.upload_screenshots.outputs.artifact-url }}
         run: |
-          node -e "const fs=require('fs'); const p='.github/.results/latest-test-run.md'; if(!fs.existsSync(p)) process.exit(0); const url=process.env.SCREENSHOT_ARTIFACT_URL||''; if(!url) process.exit(0); const src=fs.readFileSync(p,'utf8'); const out=src.replace(/<a href=\"[^\"]+\" target=\"_blank\">([^<]+)<\/a>/g, '<a href=\"'+url+'\" target=\"_blank\">$1</a>'); fs.writeFileSync(p,out);"
+          node -e "const fs=require('fs'); const files=['.github/.results/latest-test-run.md','.github/.results/latest-summary-fragment.html']; const url=process.env.SCREENSHOT_ARTIFACT_URL||''; if(!url) process.exit(0); for(const p of files){ if(!fs.existsSync(p)) continue; const src=fs.readFileSync(p,'utf8'); const out=src.replace(/<a href=\"[^\"]+\" target=\"_blank\">([^<]+)<\/a>/g, '<a href=\"'+url+'\" target=\"_blank\">$1</a>'); fs.writeFileSync(p,out);}"
 
-      - name: Display Test Report in Summary
+      - name: Display Embedded HTML Summary
         if: always()
-        run: cat .github/.results/latest-test-run.md >> $GITHUB_STEP_SUMMARY
+        run: cat .github/.results/latest-summary-fragment.html >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Result Report
         id: upload_report
@@ -63,29 +63,14 @@ jobs:
           name: codeless-report
           path: .github/.results/latest-test-run.md
 
-      - name: Upload HTML Report Bundle
-        id: upload_html_report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: codeless-report-html
-          path: |
-            .github/.results/latest-test-run.html
-            .github/.results/screenshots
-          if-no-files-found: ignore
-
       - name: Artifact Summary
         if: always()
         env:
           REPORT_ARTIFACT_URL: ${{ steps.upload_report.outputs.artifact-url }}
           SCREENSHOT_ARTIFACT_URL: ${{ steps.upload_screenshots.outputs.artifact-url }}
-          HTML_REPORT_ARTIFACT_URL: ${{ steps.upload_html_report.outputs.artifact-url }}
         run: |
           echo "## Artifacts Available" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          if [ -n "$HTML_REPORT_ARTIFACT_URL" ]; then
-            echo "- **HTML Report (clean view):** [codeless-report-html]($HTML_REPORT_ARTIFACT_URL)" >> $GITHUB_STEP_SUMMARY
-          fi
           if [ -n "$REPORT_ARTIFACT_URL" ]; then
             echo "- **Test Report:** [codeless-report]($REPORT_ARTIFACT_URL)" >> $GITHUB_STEP_SUMMARY
           else

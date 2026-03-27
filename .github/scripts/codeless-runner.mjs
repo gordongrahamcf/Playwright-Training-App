@@ -8,6 +8,7 @@ const RESULTS_DIR = path.join(ROOT, '.github', '.results');
 const SCREENSHOTS_DIR = path.join(RESULTS_DIR, 'screenshots');
 const LATEST_REPORT = path.join(RESULTS_DIR, 'latest-test-run.md');
 const LATEST_HTML_REPORT = path.join(RESULTS_DIR, 'latest-test-run.html');
+const LATEST_SUMMARY_FRAGMENT = path.join(RESULTS_DIR, 'latest-summary-fragment.html');
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 
 function slugify(value) {
@@ -859,6 +860,58 @@ function buildHtmlReport({ timestamp, baseUrl, results }) {
   return html;
 }
 
+function buildSummaryFragment({ timestamp, baseUrl, results }) {
+  const byFeature = new Map();
+  for (const result of results) {
+    if (!byFeature.has(result.feature)) byFeature.set(result.feature, []);
+    byFeature.get(result.feature).push(result);
+  }
+
+  const total = results.length;
+  const passed = results.filter((r) => r.status === 'PASS').length;
+  const failed = results.filter((r) => r.status === 'FAIL').length;
+  const skipped = results.filter((r) => r.status === 'SKIP').length;
+
+  let html = '';
+  html += '<h1>Codeless Acceptance Test Results</h1>';
+  html += `<p><strong>Run Date:</strong> ${escapeHtml(timestamp)}<br/><strong>App URL:</strong> ${escapeHtml(baseUrl)}</p>`;
+  html += '<table>';
+  html += '<thead><tr><th>Metric</th><th>Count</th></tr></thead>';
+  html += '<tbody>';
+  html += `<tr><td>Total</td><td>${total}</td></tr>`;
+  html += `<tr><td>Passed</td><td>${passed}</td></tr>`;
+  html += `<tr><td>Failed</td><td>${failed}</td></tr>`;
+  html += `<tr><td>Skipped</td><td>${skipped}</td></tr>`;
+  html += '</tbody></table>';
+
+  html += '<h2>Results by Feature</h2>';
+  for (const [feature, featureResults] of byFeature) {
+    const featurePassed = featureResults.filter((r) => r.status === 'PASS').length;
+    const featureFailed = featureResults.filter((r) => r.status === 'FAIL').length;
+    html += `<details open><summary><strong>${escapeHtml(feature)}</strong> (${featurePassed} passed, ${featureFailed} failed)</summary>`;
+    html += '<ul>';
+    for (const result of featureResults) {
+      const marker = result.status === 'PASS' ? '✓' : result.status === 'FAIL' ? '✗' : '⊘';
+      html += `<li>${marker} <strong>${escapeHtml(result.title)}</strong>`;
+      if (result.status === 'FAIL') {
+        html += '<ul>';
+        html += `<li><strong>Failed at step:</strong> ${escapeHtml(result.step || 'Unknown step')}</li>`;
+        html += `<li><strong>Error:</strong> ${escapeHtml(result.reason || 'Unknown error')}</li>`;
+        if (result.screenshot) {
+          const screenshotFilePath = result.screenshot.replace(/\\/g, '/');
+          const screenshotFileName = path.basename(result.screenshot);
+          html += `<li><strong>Evidence:</strong> <a href="${screenshotFilePath}" target="_blank">${escapeHtml(screenshotFileName)}</a></li>`;
+        }
+        html += '</ul>';
+      }
+      html += '</li>';
+    }
+    html += '</ul></details>';
+  }
+
+  return html;
+}
+
 async function run() {
   await fs.mkdir(RESULTS_DIR, { recursive: true });
   await fs.rm(SCREENSHOTS_DIR, { recursive: true, force: true });
@@ -930,6 +983,8 @@ async function run() {
   await fs.writeFile(LATEST_REPORT, report, 'utf8');
   const htmlReport = buildHtmlReport({ timestamp, baseUrl: BASE_URL, results });
   await fs.writeFile(LATEST_HTML_REPORT, htmlReport, 'utf8');
+  const summaryFragment = buildSummaryFragment({ timestamp, baseUrl: BASE_URL, results });
+  await fs.writeFile(LATEST_SUMMARY_FRAGMENT, summaryFragment, 'utf8');
 
   const failed = results.filter((r) => r.status === 'FAIL').length;
   const summary = `Codeless run complete: total=${results.length}, passed=${results.length - failed}, failed=${failed}`;
