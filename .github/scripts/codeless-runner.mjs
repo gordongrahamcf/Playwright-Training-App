@@ -751,7 +751,8 @@ function buildReport({ timestamp, baseUrl, results }) {
         md += `  - **Error:** ${result.reason}\n`;
         if (result.screenshot) {
           const screenshotFilePath = result.screenshot.replace(/\\/g, '/');
-          md += `  - **Evidence:** <a href="${screenshotFilePath}" target="_blank">View screenshot</a>\n`;
+          const screenshotFileName = path.basename(result.screenshot);
+          md += `  - **Evidence:** <a href="${screenshotFilePath}" target="_blank">${screenshotFileName}</a>\n`;
         }
       }
     }

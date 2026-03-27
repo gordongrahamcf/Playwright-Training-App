@@ -35,18 +35,8 @@ jobs:
           BASE_URL: http://127.0.0.1:5173
         run: npm run codeless:test:ci
 
-      - name: Display Test Report in Summary
-        if: always()
-        run: cat .github/.results/latest-test-run.md >> $GITHUB_STEP_SUMMARY
-
-      - name: Upload Result Report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: codeless-report
-          path: .github/.results/latest-test-run.md
-
       - name: Upload Failure Screenshots
+        id: upload_screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -54,10 +44,40 @@ jobs:
           path: .github/.results/screenshots
           if-no-files-found: ignore
 
+      - name: Rewire Screenshot Links To Artifact
+        if: always()
+        env:
+          SCREENSHOT_ARTIFACT_URL: ${{ steps.upload_screenshots.outputs.artifact-url }}
+        run: |
+          node -e "const fs=require('fs'); const p='.github/.results/latest-test-run.md'; if(!fs.existsSync(p)) process.exit(0); const url=process.env.SCREENSHOT_ARTIFACT_URL||''; if(!url) process.exit(0); const src=fs.readFileSync(p,'utf8'); const out=src.replace(/<a href=\"[^\"]+\" target=\"_blank\">([^<]+)<\/a>/g, '<a href=\"'+url+'\" target=\"_blank\">$1</a>'); fs.writeFileSync(p,out);"
+
+      - name: Display Test Report in Summary
+        if: always()
+        run: cat .github/.results/latest-test-run.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Result Report
+        id: upload_report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeless-report
+          path: .github/.results/latest-test-run.md
+
       - name: Artifact Summary
         if: always()
+        env:
+          REPORT_ARTIFACT_URL: ${{ steps.upload_report.outputs.artifact-url }}
+          SCREENSHOT_ARTIFACT_URL: ${{ steps.upload_screenshots.outputs.artifact-url }}
         run: |
           echo "## Artifacts Available" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Test Report:** codeless-report" >> $GITHUB_STEP_SUMMARY
-          echo "- **Failure Screenshots:** codeless-failure-screenshots (if any failures occurred)" >> $GITHUB_STEP_SUMMARY
+          if [ -n "$REPORT_ARTIFACT_URL" ]; then
+            echo "- **Test Report:** [codeless-report]($REPORT_ARTIFACT_URL)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Test Report:** codeless-report" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -n "$SCREENSHOT_ARTIFACT_URL" ]; then
+            echo "- **Failure Screenshots:** [codeless-failure-screenshots]($SCREENSHOT_ARTIFACT_URL)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Failure Screenshots:** codeless-failure-screenshots (if any failures occurred)" >> $GITHUB_STEP_SUMMARY
+          fi
