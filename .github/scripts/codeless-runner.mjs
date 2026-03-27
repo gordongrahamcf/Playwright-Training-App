@@ -716,26 +716,7 @@ async function executeScenario(page, feature, title) {
   fail(title, `Unhandled feature: ${feature}`);
 }
 
-function parsePreviousStatuses(markdown) {
-  const lines = markdown.split(/\r?\n/);
-  const map = new Map();
-  let feature = null;
-
-  for (const line of lines) {
-    const f = line.match(/^###\s+(.+)$/);
-    if (f) {
-      feature = f[1].trim();
-      continue;
-    }
-    const s = line.match(/^- \[(PASS|FAIL|SKIP)\]\s+(.+)$/);
-    if (feature && s) {
-      map.set(`${feature}::${s[2].trim()}`, s[1]);
-    }
-  }
-  return map;
-}
-
-function buildReport({ timestamp, baseUrl, results, previousStatuses, baseline }) {
+function buildReport({ timestamp, baseUrl, results }) {
   const byFeature = new Map();
   for (const result of results) {
     if (!byFeature.has(result.feature)) byFeature.set(result.feature, []);
@@ -747,50 +728,33 @@ function buildReport({ timestamp, baseUrl, results, previousStatuses, baseline }
   const failed = results.filter((r) => r.status === 'FAIL').length;
   const skipped = results.filter((r) => r.status === 'SKIP').length;
 
-  const currentStatuses = new Map(results.map((r) => [`${r.feature}::${r.title}`, r.status]));
-  const changes = [];
-
-  for (const [key, status] of currentStatuses) {
-    const prev = previousStatuses.get(key);
-    if (!prev) continue;
-    if (prev !== status) {
-      const [feature, title] = key.split('::');
-      changes.push(`- ${prev} -> ${status} ${feature} :: ${title}`);
-    }
-  }
-
   let md = '';
-  md += '# Test Run Report\n';
-  md += `Date: ${timestamp}\n`;
-  md += `App URL: ${baseUrl}\n\n`;
+  md += '# Codeless Acceptance Test Results\n';
+  md += `**Run Date:** ${timestamp}\n`;
+  md += `**App URL:** ${baseUrl}\n\n`;
   md += '## Summary\n';
-  md += `Total: ${total}  |  Passed: ${passed}  |  Failed: ${failed}  |  Skipped: ${skipped}\n\n`;
-  md += '## State Changes\n';
-  if (changes.length === 0) {
-    md += 'No scenario state changes since previous run.\n\n';
-  } else {
-    md += `${changes.join('\n')}\n\n`;
-  }
+  md += `| Metric | Count |\n`;
+  md += `|--------|-------|\n`;
+  md += `| Total | ${total} |\n`;
+  md += `| ✓ Passed | ${passed} |\n`;
+  md += `| ✗ Failed | ${failed} |\n`;
+  md += `| ⊘ Skipped | ${skipped} |\n\n`;
 
   md += '## Results by Feature\n\n';
   for (const [feature, featureResults] of byFeature) {
     md += `### ${feature}\n`;
     for (const result of featureResults) {
-      md += `- [${result.status}] ${result.title}\n`;
+      const statusIcon = result.status === 'PASS' ? '✓' : result.status === 'FAIL' ? '✗' : '⊘';
+      md += `- ${statusIcon} **${result.title}**\n`;
       if (result.status === 'FAIL') {
-        md += `  - Step that failed: ${result.step || 'Unknown step'}\n`;
-        md += `  - Reason: ${result.reason}\n`;
-        md += `  - Screenshot: ${result.screenshot || 'n/a'}\n`;
+        md += `  - **Failed at step:** ${result.step || 'Unknown step'}\n`;
+        md += `  - **Error:** ${result.reason}\n`;
+        if (result.screenshot) {
+          md += `  - **Evidence:** [${path.basename(result.screenshot)}](${result.screenshot.replace(/\\/g, '/')})\n`;
+        }
       }
     }
     md += '\n';
-  }
-
-  md += '## Notes\n';
-  if (baseline) {
-    md += '- Previous saved report had no scenario statuses; this run is treated as baseline for future state-change diffs.\n';
-  } else {
-    md += '- State changes are computed against the previous `.github/.results/latest-test-run.md`.\n';
   }
 
   return md;
@@ -800,16 +764,6 @@ async function run() {
   await fs.mkdir(RESULTS_DIR, { recursive: true });
   await fs.rm(SCREENSHOTS_DIR, { recursive: true, force: true });
   await fs.mkdir(SCREENSHOTS_DIR, { recursive: true });
-
-  let previousReport = '';
-  try {
-    previousReport = await fs.readFile(LATEST_REPORT, 'utf8');
-  } catch {
-    previousReport = '';
-  }
-
-  const previousStatuses = parsePreviousStatuses(previousReport);
-  const baseline = previousStatuses.size === 0;
 
   const features = await loadAcceptanceModel();
   const browser = await chromium.launch({ headless: true });
@@ -821,26 +775,44 @@ async function run() {
   for (const featureModel of features) {
     for (const scenario of featureModel.scenarios) {
       const startUrl = parseStartUrlFromSteps(scenario.steps);
+      const testLabel = `${featureModel.feature} › ${scenario.title}`;
+      
+      console.log(`\n▶ ${testLabel}`);
+      scenario.steps.forEach(step => {
+        console.log(`  ◇ ${step}`);
+      });
+      
       try {
         await resetScenario(page, startUrl);
         await executeScenario(page, featureModel.feature, scenario.title);
         results.push({ feature: featureModel.feature, title: scenario.title, status: 'PASS' });
+        console.log(`✓ PASS: ${testLabel}`);
       } catch (error) {
         const screenshotName = `${Date.now()}-${slugify(featureModel.feature)}-${slugify(scenario.title)}.png`;
         const screenshotPath = path.join(SCREENSHOTS_DIR, screenshotName);
+        const screenshotArtifactPath = path.join('.github', '.results', 'screenshots', screenshotName);
+        
         try {
           await page.screenshot({ path: screenshotPath, fullPage: true });
         } catch {
           // No-op if screenshot fails.
         }
+        
         results.push({
           feature: featureModel.feature,
           title: scenario.title,
           status: 'FAIL',
           step: error?.step || 'Unknown step',
           reason: error?.message || String(error),
-          screenshot: path.join('.github', '.results', 'screenshots', screenshotName),
+          screenshot: screenshotArtifactPath,
         });
+        
+        console.log(`✗ FAIL: ${testLabel}`);
+        console.log(`  Step: ${error?.step || 'Unknown step'}`);
+        console.log(`  Reason: ${error?.message || String(error)}`);
+        if (screenshotName) {
+          console.log(`  Screenshot: ${screenshotArtifactPath}`);
+        }
       }
     }
   }
@@ -853,20 +825,9 @@ async function run() {
     timestamp,
     baseUrl: BASE_URL,
     results,
-    previousStatuses,
-    baseline,
   });
 
   await fs.writeFile(LATEST_REPORT, report, 'utf8');
-
-  // Write report to GitHub Actions summary if running in CI
-  if (process.env.GITHUB_STEP_SUMMARY) {
-    try {
-      await fs.appendFile(process.env.GITHUB_STEP_SUMMARY, report + '\n', 'utf8');
-    } catch {
-      // Fail silently if unable to write to summary
-    }
-  }
 
   const failed = results.filter((r) => r.status === 'FAIL').length;
   const summary = `Codeless run complete: total=${results.length}, passed=${results.length - failed}, failed=${failed}`;

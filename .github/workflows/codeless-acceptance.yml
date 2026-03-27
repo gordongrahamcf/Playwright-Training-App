@@ -53,3 +53,11 @@ jobs:
           name: codeless-failure-screenshots
           path: .github/.results/screenshots
           if-no-files-found: ignore
+
+      - name: Artifact Summary
+        if: always()
+        run: |
+          echo "## Artifacts Available" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Test Report:** codeless-report" >> $GITHUB_STEP_SUMMARY
+          echo "- **Failure Screenshots:** codeless-failure-screenshots (if any failures occurred)" >> $GITHUB_STEP_SUMMARY
