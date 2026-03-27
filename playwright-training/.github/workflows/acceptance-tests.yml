@@ -6,10 +6,8 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# GitHub Models API (Copilot) requires models: read
 permissions:
   contents: read
-  models: read
 
 jobs:
   acceptance-tests:
