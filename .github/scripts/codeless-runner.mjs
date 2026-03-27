@@ -7,8 +7,6 @@ const ACCEPTANCE_DIR = path.join(ROOT, '.github', 'acceptance-criteria');
 const RESULTS_DIR = path.join(ROOT, '.github', '.results');
 const SCREENSHOTS_DIR = path.join(RESULTS_DIR, 'screenshots');
 const LATEST_REPORT = path.join(RESULTS_DIR, 'latest-test-run.md');
-const LATEST_HTML_REPORT = path.join(RESULTS_DIR, 'latest-test-run.html');
-const LATEST_SUMMARY_FRAGMENT = path.join(RESULTS_DIR, 'latest-summary-fragment.html');
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 
 function slugify(value) {
@@ -732,184 +730,47 @@ function buildReport({ timestamp, baseUrl, results }) {
 
   let md = '';
   md += '# Codeless Acceptance Test Results\n';
-  md += `**Run Date:** ${timestamp}\n`;
-  md += `**App URL:** ${baseUrl}\n\n`;
+  md += `Run date: ${timestamp}\n`;
+  md += `App URL: ${baseUrl}\n\n`;
   md += '## Summary\n';
   md += `| Metric | Count |\n`;
   md += `|--------|-------|\n`;
   md += `| Total | ${total} |\n`;
-  md += `| ✓ Passed | ${passed} |\n`;
-  md += `| ✗ Failed | ${failed} |\n`;
-  md += `| ⊘ Skipped | ${skipped} |\n\n`;
+  md += `| Passed | ${passed} |\n`;
+  md += `| Failed | ${failed} |\n`;
+  md += `| Skipped | ${skipped} |\n\n`;
 
   md += '## Results by Feature\n\n';
   for (const [feature, featureResults] of byFeature) {
     md += `### ${feature}\n`;
     for (const result of featureResults) {
       const statusIcon = result.status === 'PASS' ? '✓' : result.status === 'FAIL' ? '✗' : '⊘';
-      md += `- ${statusIcon} **${result.title}**\n`;
+      md += `- ${statusIcon} ${result.title}\n`;
       if (result.status === 'FAIL') {
-        md += `  - **Failed at step:** ${result.step || 'Unknown step'}\n`;
-        md += `  - **Error:** ${result.reason}\n`;
+        md += `  failed step: ${result.step || 'Unknown step'}\n`;
+        md += `  error: ${result.reason}\n`;
         if (result.screenshot) {
-          const screenshotFilePath = result.screenshot.replace(/\\/g, '/');
           const screenshotFileName = path.basename(result.screenshot);
-          md += `  - **Evidence:** <a href="${screenshotFilePath}" target="_blank">${screenshotFileName}</a>\n`;
+          md += `  screenshot file: ${screenshotFileName}\n`;
+          md += '  screenshot artifact: codeless-failure-screenshots\n';
+        }
+        if (result.stack) {
+          const safeStack = String(result.stack).replace(/```/g, "'''").trim();
+          md += '  stack trace:\n\n';
+          md += '```text\n';
+          md += `${safeStack}\n`;
+          md += '```\n';
         }
       }
     }
     md += '\n';
   }
 
+  md += '## Artifacts\n';
+  md += '- Failure screenshots are available in artifact: codeless-failure-screenshots\n';
+  md += '- Markdown report is available in artifact: codeless-report\n';
+
   return md;
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
-
-function buildHtmlReport({ timestamp, baseUrl, results }) {
-  const byFeature = new Map();
-  for (const result of results) {
-    if (!byFeature.has(result.feature)) byFeature.set(result.feature, []);
-    byFeature.get(result.feature).push(result);
-  }
-
-  const total = results.length;
-  const passed = results.filter((r) => r.status === 'PASS').length;
-  const failed = results.filter((r) => r.status === 'FAIL').length;
-  const skipped = results.filter((r) => r.status === 'SKIP').length;
-
-  let html = '';
-  html += '<!doctype html>';
-  html += '<html lang="en"><head><meta charset="UTF-8" />';
-  html += '<meta name="viewport" content="width=device-width, initial-scale=1.0" />';
-  html += '<title>Codeless Acceptance Test Results</title>';
-  html += '<style>';
-  html += 'body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:24px;color:#111827;background:#f8fafc;}';
-  html += '.wrap{max-width:1100px;margin:0 auto;}';
-  html += '.card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px 18px;margin-bottom:16px;}';
-  html += 'h1{font-size:1.6rem;margin:0 0 8px;} h2{font-size:1.2rem;margin:0 0 8px;} h3{font-size:1rem;margin:16px 0 8px;}';
-  html += '.meta{color:#4b5563;font-size:.92rem;margin:3px 0;}';
-  html += '.summary{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:10px;}';
-  html += '.metric{background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:10px;}';
-  html += '.metric .k{font-size:.75rem;color:#6b7280;} .metric .v{font-size:1.2rem;font-weight:700;}';
-  html += '.scenario{border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin:10px 0;background:#fff;}';
-  html += '.status{font-weight:700;} .pass{color:#166534;} .fail{color:#991b1b;} .skip{color:#374151;}';
-  html += '.steps{margin:8px 0 0 18px;color:#374151;font-size:.92rem;}';
-  html += '.error{background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:8px;margin-top:8px;}';
-  html += '.screenshot{margin-top:10px;} .screenshot img{max-width:100%;height:auto;border:1px solid #e5e7eb;border-radius:8px;}';
-  html += 'a{color:#1d4ed8;text-decoration:none;} a:hover{text-decoration:underline;}';
-  html += '@media (max-width:720px){.summary{grid-template-columns:repeat(2,minmax(120px,1fr));}}';
-  html += '</style></head><body><div class="wrap">';
-
-  html += '<div class="card">';
-  html += '<h1>Codeless Acceptance Test Results</h1>';
-  html += `<div class="meta"><strong>Run Date:</strong> ${escapeHtml(timestamp)}</div>`;
-  html += `<div class="meta"><strong>App URL:</strong> ${escapeHtml(baseUrl)}</div>`;
-  html += '<div class="summary" style="margin-top:12px;">';
-  html += `<div class="metric"><div class="k">Total</div><div class="v">${total}</div></div>`;
-  html += `<div class="metric"><div class="k">Passed</div><div class="v">${passed}</div></div>`;
-  html += `<div class="metric"><div class="k">Failed</div><div class="v">${failed}</div></div>`;
-  html += `<div class="metric"><div class="k">Skipped</div><div class="v">${skipped}</div></div>`;
-  html += '</div></div>';
-
-  for (const [feature, featureResults] of byFeature) {
-    html += '<div class="card">';
-    html += `<h2>${escapeHtml(feature)}</h2>`;
-    for (const result of featureResults) {
-      const statusClass = result.status === 'PASS' ? 'pass' : result.status === 'FAIL' ? 'fail' : 'skip';
-      const marker = result.status === 'PASS' ? '✓' : result.status === 'FAIL' ? '✗' : '⊘';
-      html += '<div class="scenario">';
-      html += `<div class="status ${statusClass}">${marker} ${escapeHtml(result.title)}</div>`;
-
-      if (Array.isArray(result.steps) && result.steps.length > 0) {
-        html += '<ul class="steps">';
-        for (const step of result.steps) {
-          html += `<li>${escapeHtml(step)}</li>`;
-        }
-        html += '</ul>';
-      }
-
-      if (result.status === 'FAIL') {
-        html += '<div class="error">';
-        html += `<div><strong>Failed at step:</strong> ${escapeHtml(result.step || 'Unknown step')}</div>`;
-        html += `<div><strong>Error:</strong> ${escapeHtml(result.reason || 'Unknown error')}</div>`;
-        html += '</div>';
-        if (result.screenshot) {
-          const fileName = path.basename(result.screenshot);
-          const imgPath = `./screenshots/${fileName}`;
-          html += '<div class="screenshot">';
-          html += `<div><a href="${imgPath}" target="_blank" rel="noopener noreferrer">Open screenshot</a></div>`;
-          html += `<img src="${imgPath}" alt="Failure screenshot: ${escapeHtml(fileName)}" />`;
-          html += '</div>';
-        }
-      }
-
-      html += '</div>';
-    }
-    html += '</div>';
-  }
-
-  html += '</div></body></html>';
-  return html;
-}
-
-function buildSummaryFragment({ timestamp, baseUrl, results }) {
-  const byFeature = new Map();
-  for (const result of results) {
-    if (!byFeature.has(result.feature)) byFeature.set(result.feature, []);
-    byFeature.get(result.feature).push(result);
-  }
-
-  const total = results.length;
-  const passed = results.filter((r) => r.status === 'PASS').length;
-  const failed = results.filter((r) => r.status === 'FAIL').length;
-  const skipped = results.filter((r) => r.status === 'SKIP').length;
-
-  let html = '';
-  html += '<h1>Codeless Acceptance Test Results</h1>';
-  html += `<p><strong>Run Date:</strong> ${escapeHtml(timestamp)}<br/><strong>App URL:</strong> ${escapeHtml(baseUrl)}</p>`;
-  html += '<table>';
-  html += '<thead><tr><th>Metric</th><th>Count</th></tr></thead>';
-  html += '<tbody>';
-  html += `<tr><td>Total</td><td>${total}</td></tr>`;
-  html += `<tr><td>Passed</td><td>${passed}</td></tr>`;
-  html += `<tr><td>Failed</td><td>${failed}</td></tr>`;
-  html += `<tr><td>Skipped</td><td>${skipped}</td></tr>`;
-  html += '</tbody></table>';
-
-  html += '<h2>Results by Feature</h2>';
-  for (const [feature, featureResults] of byFeature) {
-    const featurePassed = featureResults.filter((r) => r.status === 'PASS').length;
-    const featureFailed = featureResults.filter((r) => r.status === 'FAIL').length;
-    html += `<details open><summary><strong>${escapeHtml(feature)}</strong> (${featurePassed} passed, ${featureFailed} failed)</summary>`;
-    html += '<ul>';
-    for (const result of featureResults) {
-      const marker = result.status === 'PASS' ? '✓' : result.status === 'FAIL' ? '✗' : '⊘';
-      html += `<li>${marker} <strong>${escapeHtml(result.title)}</strong>`;
-      if (result.status === 'FAIL') {
-        html += '<ul>';
-        html += `<li><strong>Failed at step:</strong> ${escapeHtml(result.step || 'Unknown step')}</li>`;
-        html += `<li><strong>Error:</strong> ${escapeHtml(result.reason || 'Unknown error')}</li>`;
-        if (result.screenshot) {
-          const screenshotFilePath = result.screenshot.replace(/\\/g, '/');
-          const screenshotFileName = path.basename(result.screenshot);
-          html += `<li><strong>Evidence:</strong> <a href="${screenshotFilePath}" target="_blank">${escapeHtml(screenshotFileName)}</a></li>`;
-        }
-        html += '</ul>';
-      }
-      html += '</li>';
-    }
-    html += '</ul></details>';
-  }
-
-  return html;
 }
 
 async function run() {
@@ -957,6 +818,7 @@ async function run() {
           steps: scenario.steps,
           step: error?.step || 'Unknown step',
           reason: error?.message || String(error),
+          stack: error?.stack || '',
           screenshot: screenshotArtifactPath,
         });
         
@@ -981,10 +843,6 @@ async function run() {
   });
 
   await fs.writeFile(LATEST_REPORT, report, 'utf8');
-  const htmlReport = buildHtmlReport({ timestamp, baseUrl: BASE_URL, results });
-  await fs.writeFile(LATEST_HTML_REPORT, htmlReport, 'utf8');
-  const summaryFragment = buildSummaryFragment({ timestamp, baseUrl: BASE_URL, results });
-  await fs.writeFile(LATEST_SUMMARY_FRAGMENT, summaryFragment, 'utf8');
 
   const failed = results.filter((r) => r.status === 'FAIL').length;
   const summary = `Codeless run complete: total=${results.length}, passed=${results.length - failed}, failed=${failed}`;
