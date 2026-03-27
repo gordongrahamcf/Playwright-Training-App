@@ -186,7 +186,7 @@ async function runOperation(page, op, baseUrl) {
       for (let i = 0; i < maxIterations; i += 1) {
         const locator = locatorFromSpec(page, op.locator);
         if ((await locator.count()) === 0) return;
-        await locator.first().click();
+        await clickWithoutForce(locator.first(), op.timeout || 2000);
         await page.waitForTimeout(op.waitMs || 300);
       }
       return;
