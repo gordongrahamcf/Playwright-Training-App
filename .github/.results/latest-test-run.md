@@ -1,12 +1,14 @@
-# Test Run Report
-Date: 2026-03-27T11:02:06.069Z
-App URL: http://localhost:5173
+# Codeless Acceptance Test Results
+Run date: 2026-03-27T13:33:11.988Z
+App URL: http://127.0.0.1:5174
 
 ## Summary
-Total: 73  |  Passed: 72  |  Failed: 1  |  Skipped: 0
-
-## State Changes
-No scenario state changes since previous run.
+| Metric | Count |
+|--------|-------|
+| Total | 73 |
+| Passed | 73 |
+| Failed | 0 |
+| Skipped | 0 |
 
 ## Results by Feature
 
@@ -37,10 +39,7 @@ No scenario state changes since previous run.
 - [PASS] Blurring a valid email clears any previous email error
 - [PASS] Blurring a corrected password field clears the error
 - [PASS] Form does not submit when only the terms checkbox is unchecked
-- [FAIL] Form does not submit when the password is exactly 7 characters
-  - Step that failed: Form does not submit when the password is exactly 7 characters
-  - Reason: Terms checkbox did not become checked
-  - Screenshot: .github/.results/screenshots/1774609322507-forms-inputs-registration-form-form-does-not-submit-when-the-password-is-exactly-7-characters.png
+- [PASS] Form does not submit when the password is exactly 7 characters
 - [PASS] Form does not submit with a malformed email address
 
 ### Home Page
@@ -96,5 +95,10 @@ No scenario state changes since previous run.
 - [PASS] Manually checking all rows on a page checks the select-all checkbox
 - [PASS] Unchecking one row unchecks the select-all checkbox
 
-## Notes
-- State changes are computed against the previous `.github/.results/latest-test-run.md`.
+## Generation Metadata
+- App model generated at: 2026-03-27T13:32:49.010Z
+- Start URLs scraped: 6
+
+## Artifacts
+- Failure screenshots are available in artifact: codeless-failure-screenshots
+- Markdown report is available in artifact: codeless-report

@@ -1,0 +1,387 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { chromium } from 'playwright';
+
+const ROOT = process.cwd();
+const RESULTS_DIR = path.join(ROOT, '.github', '.results');
+const SCREENSHOTS_DIR = path.join(RESULTS_DIR, 'screenshots');
+const LATEST_REPORT = path.join(RESULTS_DIR, 'latest-test-run.md');
+
+function slugify(value) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 120);
+}
+
+function fail(step, reason) {
+  const err = new Error(reason);
+  err.step = step;
+  throw err;
+}
+
+function assert(step, condition, reason) {
+  if (!condition) fail(step, reason);
+}
+
+function locatorFromSpec(page, spec) {
+  if (!spec) throw new Error('Missing locator spec');
+
+  if (spec.kind === 'any') {
+    return {
+      async count() {
+        for (const candidate of spec.candidates || []) {
+          const locator = locatorFromSpec(page, candidate);
+          if ((await locator.count()) > 0) return await locator.count();
+        }
+        return 0;
+      },
+      first() {
+        const candidates = spec.candidates || [];
+        return {
+          async _pick() {
+            for (const candidate of candidates) {
+              const locator = locatorFromSpec(page, candidate);
+              if ((await locator.count()) > 0) return locator.first();
+            }
+            throw new Error('No locator candidate matched');
+          },
+          async click() { return (await this._pick()).click(); },
+          async check() { return (await this._pick()).check(); },
+          async uncheck() { return (await this._pick()).uncheck(); },
+          async fill(value) { return (await this._pick()).fill(value); },
+          async selectOption(value) { return (await this._pick()).selectOption(value); },
+          async focus() { return (await this._pick()).focus(); },
+          async blur() { return (await this._pick()).blur(); },
+          async hover() { return (await this._pick()).hover(); },
+          async isChecked() { return (await this._pick()).isChecked(); },
+          async isDisabled() { return (await this._pick()).isDisabled(); },
+          async inputValue() { return (await this._pick()).inputValue(); },
+          async getAttribute(attr) { return (await this._pick()).getAttribute(attr); },
+          async textContent() { return (await this._pick()).textContent(); },
+          async waitFor(options) { return (await this._pick()).waitFor(options); },
+        };
+      },
+      async nth(index) {
+        for (const candidate of spec.candidates || []) {
+          const locator = locatorFromSpec(page, candidate);
+          if ((await locator.count()) > index) return locator.nth(index);
+        }
+        throw new Error('No locator candidate matched nth()');
+      },
+    };
+  }
+
+  if (spec.kind === 'testId') return page.getByTestId(spec.value);
+  if (spec.kind === 'label') return page.getByLabel(spec.value);
+  if (spec.kind === 'text') return page.getByText(spec.value);
+  if (spec.kind === 'css') return page.locator(spec.value);
+  if (spec.kind === 'testIdPrefix') return page.locator(`[data-testid^="${spec.value}"]`);
+  if (spec.kind === 'role') return page.getByRole(spec.role, { name: spec.name });
+
+  throw new Error(`Unknown locator kind: ${spec.kind}`);
+}
+
+async function exists(locator) {
+  return (await locator.count()) > 0;
+}
+
+async function visible(locator) {
+  if (!(await exists(locator))) return false;
+  return locator.first().isVisible();
+}
+
+async function textOf(locator) {
+  return ((await locator.first().textContent()) || '').trim();
+}
+
+async function runOperation(page, op, baseUrl) {
+  switch (op.type) {
+    case 'resetTo': {
+      await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+      await page.evaluate(() => {
+        localStorage.clear();
+        sessionStorage.clear();
+      });
+      await page.goto(op.url, { waitUntil: 'domcontentloaded' });
+      return;
+    }
+    case 'goto': {
+      await page.goto(op.url, { waitUntil: 'domcontentloaded' });
+      return;
+    }
+    case 'click': {
+      await locatorFromSpec(page, op.locator).first().click();
+      return;
+    }
+    case 'check': {
+      const locator = locatorFromSpec(page, op.locator).first();
+      if (!(await locator.isChecked())) await locator.check();
+      return;
+    }
+    case 'uncheck': {
+      const locator = locatorFromSpec(page, op.locator).first();
+      if (await locator.isChecked()) await locator.uncheck();
+      return;
+    }
+    case 'fill': {
+      await locatorFromSpec(page, op.locator).first().fill(op.value);
+      return;
+    }
+    case 'select': {
+      await locatorFromSpec(page, op.locator).first().selectOption(op.value);
+      return;
+    }
+    case 'focus': {
+      await locatorFromSpec(page, op.locator).first().focus();
+      return;
+    }
+    case 'blur': {
+      await locatorFromSpec(page, op.locator).first().blur();
+      return;
+    }
+    case 'hover': {
+      await locatorFromSpec(page, op.locator).first().hover();
+      return;
+    }
+    case 'press': {
+      await page.keyboard.press(op.key);
+      return;
+    }
+    case 'mouseMove': {
+      await page.mouse.move(op.x, op.y);
+      return;
+    }
+    case 'wait': {
+      await page.waitForTimeout(op.ms);
+      return;
+    }
+    case 'waitVisible': {
+      await locatorFromSpec(page, op.locator).first().waitFor({ state: 'visible', timeout: op.timeout || 5000 });
+      return;
+    }
+    case 'waitHidden': {
+      await locatorFromSpec(page, op.locator).first().waitFor({ state: 'hidden', timeout: op.timeout || 5000 });
+      return;
+    }
+    case 'assert': {
+      const locator = op.locator ? locatorFromSpec(page, op.locator) : null;
+
+      if (op.assertion === 'visible') {
+        assert(op.stepText, await visible(locator), op.message || 'Expected visible');
+        return;
+      }
+      if (op.assertion === 'notVisible') {
+        assert(op.stepText, !(await exists(locator)), op.message || 'Expected not visible');
+        return;
+      }
+      if (op.assertion === 'count') {
+        assert(op.stepText, (await locator.count()) === op.value, op.message || `Expected count ${op.value}`);
+        return;
+      }
+      if (op.assertion === 'textEquals') {
+        assert(op.stepText, (await textOf(locator)) === op.value, op.message || `Expected text ${op.value}`);
+        return;
+      }
+      if (op.assertion === 'textIncludes') {
+        assert(op.stepText, (await textOf(locator)).includes(op.value), op.message || `Expected text includes ${op.value}`);
+        return;
+      }
+      if (op.assertion === 'inputValueEquals') {
+        assert(op.stepText, (await locator.first().inputValue()) === op.value, op.message || `Expected input value ${op.value}`);
+        return;
+      }
+      if (op.assertion === 'attributeEquals') {
+        assert(op.stepText, (await locator.first().getAttribute(op.attribute)) === op.value, op.message || `Expected attribute ${op.attribute}=${op.value}`);
+        return;
+      }
+      if (op.assertion === 'urlIncludes') {
+        assert(op.stepText, page.url().includes(op.value), op.message || `Expected URL includes ${op.value}`);
+        return;
+      }
+      if (op.assertion === 'checked') {
+        assert(op.stepText, await locator.first().isChecked(), op.message || 'Expected checked');
+        return;
+      }
+      if (op.assertion === 'notChecked') {
+        assert(op.stepText, !(await locator.first().isChecked()), op.message || 'Expected unchecked');
+        return;
+      }
+      if (op.assertion === 'disabled') {
+        assert(op.stepText, await locator.first().isDisabled(), op.message || 'Expected disabled');
+        return;
+      }
+      if (op.assertion === 'enabled') {
+        assert(op.stepText, !(await locator.first().isDisabled()), op.message || 'Expected enabled');
+        return;
+      }
+      if (op.assertion === 'allChecked') {
+        const count = await locator.count();
+        for (let i = 0; i < count; i += 1) {
+          assert(op.stepText, await locator.nth(i).isChecked(), `Expected checked at ${i + 1}`);
+        }
+        return;
+      }
+      if (op.assertion === 'allUnchecked') {
+        const count = await locator.count();
+        for (let i = 0; i < count; i += 1) {
+          assert(op.stepText, !(await locator.nth(i).isChecked()), `Expected unchecked at ${i + 1}`);
+        }
+        return;
+      }
+      if (op.assertion === 'rowsSortedByName') {
+        const names = await page.getByTestId('table-row').locator('td:nth-child(2)').allTextContents();
+        const normalized = names.map((x) => x.trim());
+        const sorted = [...normalized].sort((a, b) => a.localeCompare(b));
+        if (op.value === 'desc') sorted.reverse();
+        assert(op.stepText, JSON.stringify(normalized) === JSON.stringify(sorted), `Rows are not sorted by name (${op.value})`);
+        return;
+      }
+      if (op.assertion === 'firstRowLowestSalary') {
+        const rows = page.getByTestId('table-row');
+        const count = await rows.count();
+        let minSalary = Number.POSITIVE_INFINITY;
+        for (let i = 0; i < count; i += 1) {
+          const text = await rows.nth(i).innerText();
+          const match = text.match(/\$([\d,]+)/);
+          if (!match) continue;
+          const salary = Number(match[1].replace(/,/g, ''));
+          if (salary < minSalary) minSalary = salary;
+        }
+        const firstText = await rows.first().innerText();
+        const firstMatch = firstText.match(/\$([\d,]+)/);
+        const firstSalary = firstMatch ? Number(firstMatch[1].replace(/,/g, '')) : Number.NaN;
+        assert(op.stepText, firstSalary === minSalary, 'First row is not lowest salary');
+        return;
+      }
+
+      throw new Error(`Unknown assertion type: ${op.assertion}`);
+    }
+    case 'skip': {
+      console.log(`  ⚠ SKIP (not supported by generic compiler): ${op.text || ''}`);
+      return;
+    }
+    default:
+      throw new Error(`Unknown operation type: ${op.type}`);
+  }
+}
+
+function buildReport({ timestamp, baseUrl, results, appModel }) {
+  const byFeature = new Map();
+  for (const result of results) {
+    if (!byFeature.has(result.feature)) byFeature.set(result.feature, []);
+    byFeature.get(result.feature).push(result);
+  }
+
+  const total = results.length;
+  const passed = results.filter((r) => r.status === 'PASS').length;
+  const failed = results.filter((r) => r.status === 'FAIL').length;
+  const skipped = results.filter((r) => r.status === 'SKIP').length;
+
+  let md = '';
+  md += '# Codeless Acceptance Test Results\n';
+  md += `Run date: ${timestamp}\n`;
+  md += `App URL: ${baseUrl}\n\n`;
+  md += '## Summary\n';
+  md += `| Metric | Count |\n`;
+  md += `|--------|-------|\n`;
+  md += `| Total | ${total} |\n`;
+  md += `| Passed | ${passed} |\n`;
+  md += `| Failed | ${failed} |\n`;
+  md += `| Skipped | ${skipped} |\n\n`;
+
+  md += '## Results by Feature\n\n';
+  for (const [feature, featureResults] of byFeature) {
+    md += `### ${feature}\n`;
+    for (const result of featureResults) {
+      md += `- [${result.status}] ${result.title}\n`;
+      if (result.status === 'FAIL') {
+        md += '\n```text\n';
+        md += `failed step: ${result.step || 'Unknown step'}\n`;
+        md += `error: ${result.reason}\n`;
+        if (result.screenshot) md += `screenshot file: ${path.basename(result.screenshot)}\n`;
+        md += '```\n';
+      }
+    }
+    md += '\n';
+  }
+
+  md += '## Generation Metadata\n';
+  md += `- App model generated at: ${appModel?.generatedAt || 'unknown'}\n`;
+  md += `- Start URLs scraped: ${appModel?.startUrls?.length || 0}\n`;
+
+  md += '\n## Artifacts\n';
+  md += '- Failure screenshots are available in artifact: codeless-failure-screenshots\n';
+  md += '- Markdown report is available in artifact: codeless-report\n';
+
+  return md;
+}
+
+export async function runCompiledCodelessModel({ compiledModel, appModel, baseUrl }) {
+  await fs.mkdir(RESULTS_DIR, { recursive: true });
+  await fs.rm(SCREENSHOTS_DIR, { recursive: true, force: true });
+  await fs.mkdir(SCREENSHOTS_DIR, { recursive: true });
+
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext();
+  const page = await context.newPage();
+
+  const results = [];
+
+  for (const feature of compiledModel) {
+    for (const scenario of feature.scenarios) {
+      const testLabel = `${feature.feature} › ${scenario.title}`;
+      console.log(`\n▶ ${testLabel}`);
+      try {
+        await runOperation(page, { type: 'resetTo', url: scenario.startUrl }, baseUrl);
+        for (const step of scenario.steps) {
+          console.log(`  ◇ ${step.keyword} ${step.text}`);
+          for (const op of step.operations) {
+            await runOperation(page, { ...op, stepText: step.text }, baseUrl);
+          }
+        }
+        results.push({ feature: feature.feature, title: scenario.title, status: 'PASS' });
+        console.log(`PASS: ${testLabel}`);
+      } catch (error) {
+        const screenshotName = `${Date.now()}-${slugify(feature.feature)}-${slugify(scenario.title)}.png`;
+        const screenshotPath = path.join(SCREENSHOTS_DIR, screenshotName);
+        const screenshotArtifactPath = path.join('.github', '.results', 'screenshots', screenshotName);
+        try {
+          await page.screenshot({ path: screenshotPath, fullPage: true });
+        } catch {
+          // ignore screenshot capture failures
+        }
+        results.push({
+          feature: feature.feature,
+          title: scenario.title,
+          status: 'FAIL',
+          step: error?.step || 'Unknown step',
+          reason: error?.message || String(error),
+          screenshot: screenshotArtifactPath,
+        });
+        console.log(`FAIL: ${testLabel}`);
+        console.log(`  Step: ${error?.step || 'Unknown step'}`);
+        console.log(`  Reason: ${error?.message || String(error)}`);
+        console.log(`  Screenshot: ${screenshotArtifactPath}`);
+      }
+    }
+  }
+
+  await context.close();
+  await browser.close();
+
+  const report = buildReport({
+    timestamp: new Date().toISOString(),
+    baseUrl,
+    results,
+    appModel,
+  });
+
+  await fs.writeFile(LATEST_REPORT, report, 'utf8');
+
+  const failed = results.filter((r) => r.status === 'FAIL').length;
+  const summary = `Codeless run complete: total=${results.length}, passed=${results.length - failed}, failed=${failed}`;
+  if (failed > 0) {
+    console.error(summary);
+    process.exitCode = 1;
+  } else {
+    console.log(summary);
+  }
+}

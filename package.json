@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "codeless:test": "node .github/scripts/codeless-runner.mjs",
-    "codeless:test:ci": "wait-on http://localhost:5173 && node .github/scripts/codeless-runner.mjs"
+    "codeless:test:ci": "node .github/scripts/codeless-runner.mjs"
   },
   "dependencies": {
     "prism-react-renderer": "^2.4.1",
