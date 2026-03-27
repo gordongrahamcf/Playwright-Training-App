@@ -33,8 +33,9 @@ When asked to run tests:
 
 1. Read every `.feature` file in `.github/acceptance-criteria/`.
 2. Group scenarios by `Feature`.
-3. Run all scenarios unless a specific feature or scenario tag is specified.
-4. Track pass/fail per scenario by title.
+3. Execute runs in feature-sized chunks (one feature file/group at a time) rather than one giant all-in-one run.
+4. Run all scenarios unless a specific feature or scenario tag is specified.
+5. Track pass/fail per scenario by title.
 
 ### Gherkin Keyword Mapping
 
@@ -126,8 +127,11 @@ Many frontend apps have async patterns (loading spinners, debounced inputs, anim
 
 To keep scenarios independent:
 
-- Navigate to a clean page at the start of each scenario.
-- If the app uses `localStorage`, clear it between scenarios: `playwright_evaluate` → `localStorage.clear()`.
+- Perform a fast isolation reset at the start of each scenario:
+  - Navigate to a clean page (typically app root).
+  - Clear browser storage used by the app.
+  - Navigate to the scenario start URL.
+- If the app uses `localStorage` and/or `sessionStorage`, clear them between scenarios: `playwright_evaluate` → `localStorage.clear()` and `sessionStorage.clear()`.
 - If a scenario requires a logged-in user, perform the login steps in `Given` or via `Background`.
 - If a scenario modifies shared data (e.g., deletes a record), note it in the report as a potential dependency risk.
 
@@ -157,6 +161,22 @@ Total: X  |  Passed: X  |  Failed: X  |  Skipped: X
 
 - Mark a scenario `[SKIP]` only if the feature file is tagged `@skip` or the app state makes the scenario impossible to execute.
 - Do not silently swallow failures. Every `[FAIL]` must include the failing step and observed vs expected state.
+
+### Persist Latest Results
+
+After each test run, persist the latest results to the repository under `.github/.results/`:
+
+1. Ensure `.github/.results/` exists.
+2. Overwrite `.github/.results/latest-test-run.md` with the full current run report (do not append).
+3. If a previous `.github/.results/latest-test-run.md` exists, compare previous vs current scenario outcomes and include a `## State Changes` section in the new report.
+
+In `## State Changes`, list only outcome transitions:
+
+- `PASS -> FAIL` (regression)
+- `FAIL -> PASS` (fix verified)
+- `SKIP -> PASS/FAIL` and `PASS/FAIL -> SKIP`
+
+If no scenario outcomes changed, include: `No scenario state changes since previous run.`
 
 ---
 
