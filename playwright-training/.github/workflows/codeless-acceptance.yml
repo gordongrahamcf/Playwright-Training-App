@@ -1,0 +1,51 @@
+name: Codeless Acceptance
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  codeless-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Install Playwright Browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Start App
+        run: npm run dev -- --host 0.0.0.0 --port 5173 &
+
+      - name: Run Codeless Acceptance
+        env:
+          BASE_URL: http://127.0.0.1:5173
+        run: npm run codeless:test:ci
+
+      - name: Upload Result Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeless-report
+          path: .github/.results/latest-test-run.md
+
+      - name: Upload Failure Screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeless-failure-screenshots
+          path: .github/.results/screenshots
+          if-no-files-found: ignore
