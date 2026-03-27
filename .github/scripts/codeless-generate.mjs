@@ -259,6 +259,15 @@ function buildLocator(phrase, appModel, pageUrl) {
       }))
       .sort((a, b) => (b.score - a.score) || (a.id.length - b.id.length));
     if (successCandidates[0]) return { kind: 'testId', value: successCandidates[0].id };
+    return {
+      kind: 'any',
+      candidates: [
+        { kind: 'testId', value: `${s}` },
+        { kind: 'testId', value: `delete-${s}` },
+        { kind: 'css', value: '[data-testid*="success" i], [class*="success" i]' },
+        { kind: 'text', value: 'successfully' },
+      ],
+    };
   }
 
   if (tokens.includes('table') && tokens.includes('row')) {
@@ -420,6 +429,10 @@ function compileAction(text, verb, appModel, pageUrl) {
 
   if (verb === 'click' && /\bdrawer\s+backdrop\b/i.test(text)) {
     return [{ type: 'click', locator: buildLocator('drawer backdrop', appModel, pageUrl) }];
+  }
+
+  if (verb === 'click' && /\btoggle\s+button\s+again\b/i.test(text)) {
+    return [{ type: 'click', locator: { kind: 'css', value: 'button[aria-expanded="true"], [role="button"][aria-expanded="true"]' } }];
   }
 
   if (verb === 'check' && /\bfirst\s+table\s+row\b/i.test(text)) {

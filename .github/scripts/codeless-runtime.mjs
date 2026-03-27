@@ -52,6 +52,7 @@ function locatorFromSpec(page, spec) {
           async focus() { return (await this._pick()).focus(); },
           async blur() { return (await this._pick()).blur(); },
           async hover() { return (await this._pick()).hover(); },
+          async scrollIntoViewIfNeeded() { return (await this._pick()).scrollIntoViewIfNeeded(); },
           async isVisible() { return (await this._pick()).isVisible(); },
           async isChecked() { return (await this._pick()).isChecked(); },
           async isDisabled() { return (await this._pick()).isDisabled(); },
@@ -106,7 +107,9 @@ async function waitForCondition(check, timeoutMs = 3000, stepMs = 100) {
 
 async function waitForInteractable(locator, timeout = 5000) {
   await locator.waitFor({ state: 'visible', timeout });
-  await locator.scrollIntoViewIfNeeded();
+  if (typeof locator.scrollIntoViewIfNeeded === 'function') {
+    await locator.scrollIntoViewIfNeeded();
+  }
   const enabled = await waitForCondition(async () => !(await locator.isDisabled()), Math.min(timeout, 3000));
   if (!enabled) throw new Error('Target is visible but disabled');
 }
@@ -118,12 +121,18 @@ async function clickWithoutForce(locator, timeout = 5000) {
 
 async function checkWithoutForce(locator, timeout = 5000) {
   await waitForInteractable(locator, timeout);
-  await locator.check({ timeout });
+  if (await locator.isChecked()) return;
+  await locator.click({ timeout });
+  const becameChecked = await waitForCondition(async () => locator.isChecked(), Math.min(timeout, 2000));
+  if (!becameChecked) throw new Error('Clicking the checkbox did not change its state');
 }
 
 async function uncheckWithoutForce(locator, timeout = 5000) {
   await waitForInteractable(locator, timeout);
-  await locator.uncheck({ timeout });
+  if (!(await locator.isChecked())) return;
+  await locator.click({ timeout });
+  const becameUnchecked = await waitForCondition(async () => !(await locator.isChecked()), Math.min(timeout, 2000));
+  if (!becameUnchecked) throw new Error('Clicking the checkbox did not clear its state');
 }
 
 async function runOperation(page, op, baseUrl) {
