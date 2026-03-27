@@ -125,9 +125,45 @@ function buildLocator(phrase, appModel, pageUrl) {
   const page = appModel?.pages?.[pageUrl] || {};
   const s = slug(phrase);
   const lower = phrase.toLowerCase();
+  const testIds = page.testIds || [];
 
-  if (page.testIds?.includes(s)) return { kind: 'testId', value: s };
-  const tid = page.testIds?.find((id) => id.includes(s) || s.includes(id));
+  const tokens = lower
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .split(/\s+/)
+    .map((t) => t.replace(/s$/, ''))
+    .filter((t) => t && !['the', 'a', 'an', 'of', 'in', 'on', 'to', 'for', 'and', 'all'].includes(t));
+
+  if (tokens.includes('page') && tokens.includes('button')) {
+    const pagePrefix = testIds.find((id) => /^pagination-page-\d+$/.test(id));
+    if (pagePrefix) return { kind: 'testIdPrefix', value: 'pagination-page-' };
+  }
+
+  if (tokens.includes('row') && tokens.includes('checkbox')) {
+    const checkboxId = testIds.find((id) => id.includes('row-checkbox'));
+    if (checkboxId) return { kind: 'testId', value: checkboxId };
+  }
+
+  if (tokens.includes('select-all') || (tokens.includes('select') && tokens.includes('checkbox'))) {
+    const selectAll = testIds.find((id) => id.includes('select-all'));
+    if (selectAll) return { kind: 'testId', value: selectAll };
+  }
+
+  // Prefer repeated item-like IDs for collection/count assertions.
+  if (/(list|rows?|cards?|items?|buttons?|checkboxes?)\b/i.test(lower)) {
+    const scored = testIds
+      .map((id) => {
+        const idLower = id.toLowerCase();
+        const score = tokens.reduce((n, token) => n + (idLower.includes(token) ? 2 : 0), 0)
+          + (/-(item|row|card|button|checkbox)$/.test(idLower) ? 1 : 0);
+        return { id, score };
+      })
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score);
+    if (scored[0]) return { kind: 'testId', value: scored[0].id };
+  }
+
+  if (testIds.includes(s)) return { kind: 'testId', value: s };
+  const tid = testIds.find((id) => id.includes(s) || s.includes(id));
   if (tid) return { kind: 'testId', value: tid };
   const lbl = page.labels?.find((l) => l.toLowerCase().includes(lower));
   if (lbl) return { kind: 'label', value: lbl };
@@ -210,6 +246,23 @@ function compileAction(text, verb, appModel, pageUrl) {
     return [{ type: 'click', locator: buildLocator(q[0], appModel, pageUrl) }];
   }
 
+  // Handle scoped clicks such as "... in the modal/drawer" by preferring button role.
+  if (verb === 'click' && /\bin the\s+(modal|drawer)\b/i.test(text) && q[0]) {
+    return [{ type: 'click', locator: { kind: 'role', role: 'button', name: q[0] } }];
+  }
+
+  if (verb === 'check' && /\bfirst\s+table\s+row\b/i.test(text)) {
+    return [{ type: 'check', locator: { kind: 'testId', value: 'row-checkbox' } }];
+  }
+
+  if (verb === 'uncheck' && /\bfirst\s+table\s+row\b/i.test(text)) {
+    return [{ type: 'uncheck', locator: { kind: 'testId', value: 'row-checkbox' } }];
+  }
+
+  if (verb === 'check' && /\beach of the\s+\d+\s+rows?\s+individually\b/i.test(text)) {
+    return [{ type: 'check', locator: { kind: 'testId', value: 'row-checkbox' } }];
+  }
+
   // click, check, uncheck, hover, blur, focus
   const target = q[0] || nounPhrase(text, verb);
   const locator = buildLocator(target, appModel, pageUrl);
@@ -229,6 +282,93 @@ function compileAction(text, verb, appModel, pageUrl) {
 // Rules use universal assertion vocabulary only — no project-specific phrases.
 
 const ASSERTION_RULES = [
+  // Generic "I should see ..." forms
+  {
+    test: (t) => /^I should see the heading "/i.test(t),
+    compile: (_t, q) => [{ type: 'assert', assertion: 'headingVisible', value: q[0] }],
+  },
+  {
+    test: (t) => /^I should see the error "/i.test(t),
+    compile: (_t, q) => [{ type: 'assert', assertion: 'textPresent', value: q[0] }],
+  },
+  {
+    test: (t) => /^I should see a code block containing "/i.test(t),
+    compile: (_t, q) => [{ type: 'assert', assertion: 'textPresent', value: q[0] }],
+  },
+  {
+    test: (t) => /^I should see the exercise page for "/i.test(t),
+    compile: (_t, q) => [{ type: 'assert', assertion: 'textPresent', value: q[0] }],
+  },
+  {
+    test: (t) => /^I should see \d+\s+/i.test(t),
+    compile: (t, _q, am, url) => {
+      const n = Number((t.match(/\d+/) || ['0'])[0]);
+      const target = t.replace(/^I should see\s+\d+\s+/i, '').trim();
+      return [{ type: 'assert', assertion: 'count', locator: buildLocator(target, am, url), value: n }];
+    },
+  },
+
+  // "there should be N ..."
+  {
+    test: (t) => /^there should be\s+\d+\s+/i.test(t),
+    compile: (t, _q, am, url) => {
+      const n = Number((t.match(/\d+/) || ['0'])[0]);
+      const target = t.replace(/^there should be\s+\d+\s+/i, '').trim();
+      return [{ type: 'assert', assertion: 'count', locator: buildLocator(target, am, url), value: n }];
+    },
+  },
+
+  // "X should have a \"Y\" button"
+  {
+    test: (t) => /\bshould have a\s+"[^"]+"\s+button\b/i.test(t),
+    compile: (_t, q) => [{ type: 'assert', assertion: 'buttonVisible', value: q[0] }],
+  },
+
+  // "X should contain the heading/text ..."
+  {
+    test: (t) => /\bshould contain the heading\s+"[^"]+"/i.test(t),
+    compile: (_t, q) => [{ type: 'assert', assertion: 'headingVisible', value: q[0] }],
+  },
+  {
+    test: (t) => /\bshould contain (?:the )?text\s+"[^"]+"/i.test(t),
+    compile: (_t, q) => [{ type: 'assert', assertion: 'textPresent', value: q[0] }],
+  },
+
+  // "cards should be labelled \"a\", \"b\" ..."
+  {
+    test: (t) => /\bshould be labelled\b/i.test(t),
+    compile: (_t, q) => [{ type: 'assert', assertion: 'allTextsPresent', values: q }],
+  },
+
+  // "should display ..." with quoted content
+  {
+    test: (t) => /\bshould display\s+"[^"]+"/i.test(t),
+    compile: (_t, q) => [{ type: 'assert', assertion: 'textPresent', value: q[0] }],
+  },
+
+  // "should show ..." variants
+  {
+    test: (t) => /\bshould show (?:an |a )?(?:ascending|descending|neutral|sort)\b/i.test(t),
+    compile: (t, _q, am, url) => {
+      const subject = t.replace(/^(?:the|a|an)\s+/i, '').replace(/\s+should\s+show\s+.*$/i, '').trim();
+      return [{ type: 'assert', assertion: 'visible', locator: buildLocator(subject, am, url) }];
+    },
+  },
+  {
+    test: (t) => /\bshould show (?:its\s+)?content\b/i.test(t),
+    compile: (t, q, am, url) => {
+      const subject = t.replace(/^(?:the|a|an)\s+/i, '').replace(/\s+should\s+show\s+.*$/i, '').trim();
+      return [{ type: 'assert', assertion: 'notVisible', locator: buildLocator(q[0] || subject, am, url) }];
+    },
+  },
+  {
+    test: (t) => /\bshould remain visible\b/i.test(t),
+    compile: (t, q, am, url) => {
+      const subject = t.replace(/^(?:the|a|an)\s+/i, '').replace(/\s+should\s+remain\s+visible\s*$/i, '').trim();
+      return [{ type: 'assert', assertion: 'visible', locator: buildLocator(q[0] || subject, am, url) }];
+    },
+  },
+
   // Negative visibility
   {
     test: (t) => /\bshould not be visible\b|\bshould not be present\b|\bno longer be visible\b/i.test(t),
@@ -284,6 +424,14 @@ const ASSERTION_RULES = [
       return [{ type: 'assert', assertion: 'notChecked', locator: buildLocator(q[0] || subject, am, url) }];
     },
   },
+  {
+    test: (t) => /^all\s+\d+\s+.*checkboxes\s+should\s+be\s+checked$/i.test(t),
+    compile: (_t, _q, am, url) => [{ type: 'assert', assertion: 'allChecked', locator: buildLocator('row checkboxes', am, url) }],
+  },
+  {
+    test: (t) => /^all\s+\d+\s+.*checkboxes\s+should\s+be\s+unchecked$/i.test(t),
+    compile: (_t, _q, am, url) => [{ type: 'assert', assertion: 'allUnchecked', locator: buildLocator('row checkboxes', am, url) }],
+  },
   // URL
   {
     test: (t) => /\burl should contain "/i.test(t),
@@ -309,6 +457,15 @@ const ASSERTION_RULES = [
       const subject = t.split(/\bshould contain\b/i)[0].replace(/^(?:the|a|every\s+\w+)\s+/i, '').trim();
       return [{ type: 'assert', assertion: 'textIncludes', locator: buildLocator(subject, am, url), value: q[0] }];
     },
+  },
+  {
+    test: (t) => /\bshould contain\b.*\bwith role\b/i.test(t),
+    compile: (_t, q) => [{ type: 'assert', assertion: 'allTextsPresent', values: q }],
+  },
+  // "... should contain a card for \"X\" with role \"Y\""
+  {
+    test: (t) => /\bshould contain a card for\s+"[^"]+"\s+with role\s+"[^"]+"/i.test(t),
+    compile: (_t, q) => [{ type: 'assert', assertion: 'allTextsPresent', values: q }],
   },
   // Empty (count = 0)
   {

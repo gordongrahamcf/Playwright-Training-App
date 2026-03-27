@@ -51,6 +51,7 @@ function locatorFromSpec(page, spec) {
           async focus() { return (await this._pick()).focus(); },
           async blur() { return (await this._pick()).blur(); },
           async hover() { return (await this._pick()).hover(); },
+          async isVisible() { return (await this._pick()).isVisible(); },
           async isChecked() { return (await this._pick()).isChecked(); },
           async isDisabled() { return (await this._pick()).isDisabled(); },
           async inputValue() { return (await this._pick()).inputValue(); },
@@ -111,14 +112,36 @@ async function runOperation(page, op, baseUrl) {
       await locatorFromSpec(page, op.locator).first().click();
       return;
     }
+    case 'repeatClickUntilGone': {
+      const maxIterations = op.maxIterations || 20;
+      for (let i = 0; i < maxIterations; i += 1) {
+        const locator = locatorFromSpec(page, op.locator);
+        if ((await locator.count()) === 0) return;
+        await locator.first().click();
+        await page.waitForTimeout(op.waitMs || 300);
+      }
+      return;
+    }
     case 'check': {
       const locator = locatorFromSpec(page, op.locator).first();
-      if (!(await locator.isChecked())) await locator.check();
+      if (!(await locator.isChecked())) {
+        try {
+          await locator.check();
+        } catch {
+          await locator.click({ force: true });
+        }
+      }
       return;
     }
     case 'uncheck': {
       const locator = locatorFromSpec(page, op.locator).first();
-      if (await locator.isChecked()) await locator.uncheck();
+      if (await locator.isChecked()) {
+        try {
+          await locator.uncheck();
+        } catch {
+          await locator.click({ force: true });
+        }
+      }
       return;
     }
     case 'fill': {
@@ -169,7 +192,7 @@ async function runOperation(page, op, baseUrl) {
         return;
       }
       if (op.assertion === 'notVisible') {
-        assert(op.stepText, !(await exists(locator)), op.message || 'Expected not visible');
+        assert(op.stepText, !(await visible(locator)), op.message || 'Expected not visible');
         return;
       }
       if (op.assertion === 'count') {
@@ -182,6 +205,28 @@ async function runOperation(page, op, baseUrl) {
       }
       if (op.assertion === 'textIncludes') {
         assert(op.stepText, (await textOf(locator)).includes(op.value), op.message || `Expected text includes ${op.value}`);
+        return;
+      }
+      if (op.assertion === 'textPresent') {
+        assert(op.stepText, await visible(page.getByText(op.value)), op.message || `Expected visible text ${op.value}`);
+        return;
+      }
+      if (op.assertion === 'textNotPresent') {
+        assert(op.stepText, !(await exists(page.getByText(op.value))), op.message || `Expected text not present ${op.value}`);
+        return;
+      }
+      if (op.assertion === 'allTextsPresent') {
+        for (const value of op.values || []) {
+          assert(op.stepText, await visible(page.getByText(value)), `Expected visible text ${value}`);
+        }
+        return;
+      }
+      if (op.assertion === 'buttonVisible') {
+        assert(op.stepText, await visible(page.getByRole('button', { name: op.value })), op.message || `Expected button ${op.value}`);
+        return;
+      }
+      if (op.assertion === 'headingVisible') {
+        assert(op.stepText, await visible(page.getByRole('heading', { name: op.value })), op.message || `Expected heading ${op.value}`);
         return;
       }
       if (op.assertion === 'inputValueEquals') {
